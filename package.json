@@ -1,0 +1,66 @@
+{
+  "name": "cosmos-providers",
+  "version": "0.1.0",
+  "description": "Cliente TypeScript para la API de Etherfuse (onramp/offramp MXN·SPEI y BRL·PIX) con generación de QR PIX, estilo Discord.js: Client + Managers + Structures. Isomórfico: backend y frontend.",
+  "keywords": [
+    "etherfuse",
+    "pix",
+    "brl",
+    "spei",
+    "onramp",
+    "offramp",
+    "stablecoin",
+    "qr",
+    "payments",
+    "brcode"
+  ],
+  "license": "MIT",
+  "author": "Cosmos",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./webhooks": {
+      "types": "./dist/webhooks/index.d.ts",
+      "import": "./dist/webhooks/index.js",
+      "require": "./dist/webhooks/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "vitest run tests/e2e.test.ts",
+    "flow": "tsx examples/full-flow.ts",
+    "prepublishOnly": "npm run typecheck && npm run build && npm run test"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/qrcode": "^1.5.5",
+    "dotenv": "^17.4.2",
+    "tsup": "^8.3.5",
+    "tsx": "^4.23.1",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,186 @@
+{
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/examples/backend-pix-onramp.ts": {
+    "mtime": 1785610662593.2065,
+    "hash": "c53decd1621b8c92d517fd6f51a8298c"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/examples/frontend-pix-qr.tsx": {
+    "mtime": 1785610672074.6106,
+    "hash": "3b4b36e0b3388c0bec722e224f4cdda2"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/examples/full-flow.ts": {
+    "mtime": 1785611165987.6362,
+    "hash": "c387618c8b69114b404a6a0ed3f73561"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/examples/webhook-server.ts": {
+    "mtime": 1785610677023.0076,
+    "hash": "f86c77a39fb3a258b215ad66e612d190"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/atoms/EventEmitter.ts": {
+    "mtime": 1785610579235.6914,
+    "hash": "66c81dde75f2e3e943aab84337367477"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/atoms/REST.ts": {
+    "mtime": 1785610940344.549,
+    "hash": "c9cc5a680be395cf11c11e1c927dc75f"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/atoms/constants.ts": {
+    "mtime": 1785610223340.9194,
+    "hash": "78d0eb337a81cbc016283abf7e2d9588"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/atoms/crc16.ts": {
+    "mtime": 1785610241470.5005,
+    "hash": "804cebf594c5f5c0db0388a38337c381"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/atoms/errors.ts": {
+    "mtime": 1785610232262.1086,
+    "hash": "22d7370acad8592b47c862e4725a0fbd"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/client/EtherfuseClient.ts": {
+    "mtime": 1785610940346.5493,
+    "hash": "c04a124a1777b081f6865f3aace0916f"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/client/LookupClient.ts": {
+    "mtime": 1785610940347.5493,
+    "hash": "013f643a7648c569cceb47125a554944"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/client/WebSocketManager.ts": {
+    "mtime": 1785610940348.548,
+    "hash": "a8bbfac8d3846efd4623c069b24320d3"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/index.ts": {
+    "mtime": 1785610940349.5488,
+    "hash": "ef5bec788c08d8a2b4658eab12055e1c"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/BankAccount.ts": {
+    "mtime": 1785610940349.5488,
+    "hash": "65f4323a3f07728ef0d232c383ec3b8c"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/Base.ts": {
+    "mtime": 1785610940350.5483,
+    "hash": "56c645e879d551d48560245a64cf7f67"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/Customer.ts": {
+    "mtime": 1785610940351.5483,
+    "hash": "fa435a62b58b9551addf0db82e04423c"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/Order.ts": {
+    "mtime": 1785610940351.5483,
+    "hash": "f2a5e9e212a7f8654e76457cf9d32bcd"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/Pix.ts": {
+    "mtime": 1785610940352.5493,
+    "hash": "87ffa22c8fdb45d5ee9411d42e154e9c"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/Quote.ts": {
+    "mtime": 1785610940353.5498,
+    "hash": "5285c5e0ec7a8094c2a88b564be0d62a"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/Wallet.ts": {
+    "mtime": 1785610940353.5498,
+    "hash": "eae08b914df3dba446e9f91ca585ac7e"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/Webhook.ts": {
+    "mtime": 1785610940354.55,
+    "hash": "cfcce333ff90f5a9d9316fb2cfaad314"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/AssetManager.ts": {
+    "mtime": 1785610940354.55,
+    "hash": "c9db0612123018e26d5241045692fa30"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/BankAccountManager.ts": {
+    "mtime": 1785610940355.5493,
+    "hash": "177a09c143ccb0447f8c240037fe30da"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/BaseManager.ts": {
+    "mtime": 1785610940355.5493,
+    "hash": "14661bbf61b8969054e66a8356526799"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/CustomerManager.ts": {
+    "mtime": 1785610940356.5493,
+    "hash": "e920039e0af46315a7e048552d23986c"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/LookupManager.ts": {
+    "mtime": 1785610940356.5493,
+    "hash": "c86fb651bf16e191c4c6a2783b88418c"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/OrderManager.ts": {
+    "mtime": 1785610940357.5493,
+    "hash": "494130d0dade7c54579705bec8ad60e2"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/QuoteManager.ts": {
+    "mtime": 1785610940357.5493,
+    "hash": "23a0734060db9279f9781fff9d25bafe"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/SandboxManager.ts": {
+    "mtime": 1785610940358.5476,
+    "hash": "9365318e5376cb3b2f88b3407a8f42ba"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/SwapManager.ts": {
+    "mtime": 1785610940358.5476,
+    "hash": "e009fcbb96855acf2173dc9e6aaeacf2"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/WalletManager.ts": {
+    "mtime": 1785610940359.548,
+    "hash": "0cf85303fde5b46f92040d78bc9e9982"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/WebhookManager.ts": {
+    "mtime": 1785610940359.548,
+    "hash": "e8259c5c0be0d13df22a70ddd668a285"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/types/index.ts": {
+    "mtime": 1785610940360.5488,
+    "hash": "b62b64dbda836b366e9187b0a7e22c05"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/webhooks/index.ts": {
+    "mtime": 1785610940360.5488,
+    "hash": "99dc4936685e49ee2ed1c327c644cca8"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/crc16.test.ts": {
+    "mtime": 1785611003750.1208,
+    "hash": "2f9f2e425acf98d4506abe8cf6848fb2"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/e2e.test.ts": {
+    "mtime": 1785611142638.2373,
+    "hash": "7ea95b47e86714b0a674c576a586d74e"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/emitter.test.ts": {
+    "mtime": 1785611077604.2595,
+    "hash": "c9ae6360280c96d4638626f5444198f5"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/helpers/mockFetch.ts": {
+    "mtime": 1785611054785.4563,
+    "hash": "277a0fe9ee87ff586b9b6e52e8c8d7b1"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/managers.test.ts": {
+    "mtime": 1785611125816.511,
+    "hash": "fb7b6f3adb6dd1053cca8f5182358ac0"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/order.test.ts": {
+    "mtime": 1785611098932.3052,
+    "hash": "2365554f0a26c735a2843d678518f49f"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/pix.test.ts": {
+    "mtime": 1785611025053.989,
+    "hash": "69a59dc6064e2fe3409dffe5480d129f"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/rest.test.ts": {
+    "mtime": 1785611070758.5532,
+    "hash": "808905fef6faf8974c5b645c6c6fa8a8"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/webhooks.test.ts": {
+    "mtime": 1785611038318.5515,
+    "hash": "397a9acfcc6d28dfe758c925c8282fa4"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tsup.config.ts": {
+    "mtime": 1785610192861.102,
+    "hash": "7f2f49609e03a3d882bbb8e5c7126af9"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/vitest.config.ts": {
+    "mtime": 1785610949715.162,
+    "hash": "4c636bc0b7515800971657dadf01cbba"
+  },
+  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/README.md": {
+    "mtime": 1785610715849.144,
+    "hash": "b9add7ddd828fc548490e0f208275b94"
+  }
+}
