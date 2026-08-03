@@ -17,6 +17,19 @@ export interface MockRule {
   sequence?: Array<{ status?: number; response?: unknown }>;
 }
 
+/** Body recorder: JSON string bodies parse to objects; `FormData` bodies become plain objects. */
+function parseBody(body: BodyInit | null | undefined): unknown {
+  if (!body) return undefined;
+  if (typeof FormData !== "undefined" && body instanceof FormData) {
+    const record: Record<string, FormDataEntryValue> = {};
+    body.forEach((value, key) => {
+      record[key] = value;
+    });
+    return record;
+  }
+  return JSON.parse(String(body));
+}
+
 export function createMockFetch(rules: MockRule[]) {
   const requests: RecordedRequest[] = [];
   const counters = new Map<string, number>();
@@ -34,7 +47,7 @@ export function createMockFetch(rules: MockRule[]) {
       url,
       path: pathname,
       headers,
-      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      body: parseBody(init?.body),
     });
 
     const key = `${method} ${pathname}`;

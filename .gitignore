@@ -3,5 +3,6 @@ dist/
 *.tsbuildinfo
 .env
 .env.*
+!.env.example
 .graphify/cache/
 .stellar-sandbox-keys.json

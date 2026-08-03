@@ -267,6 +267,54 @@ const client = new EtherfuseClient({ apiKey: process.env.ETHERFUSE_API_KEY, envi
 
 La verificación de webhooks de Etherfuse (solo Node) vive en el subpath `cosmos-providers/webhooks`. Mirá la carpeta [examples](../examples) para flujos completos.
 
+## Cliente Koywe (ARS/CLP/MXN/COP/PEN/BRL ↔ USDC en Stellar)
+
+Cliente sin dependencias para la API de ramp de [Koywe](https://docs-crypto.koywe.com). A diferencia de los `PaymentProvider` de arriba (que solo cobran fiat — la pata cripto es tu propio `settlement`), Koywe entrega USDC directamente a una dirección de Stellar como parte de la orden, así que se expone como cliente standalone, igual que `EtherfuseClient`:
+
+```ts
+import { KoyweClient } from "cosmos-providers";
+
+const koywe = new KoyweClient({
+  clientId: process.env.KOYWE_CLIENT_ID,
+  secret: process.env.KOYWE_SECRET,
+  baseUrl: process.env.KOYWE_BASE_URL, // https://api-sandbox.koywe.com en sandbox
+  usdcIssuer: process.env.PUBLIC_USDC_ISSUER,
+});
+
+// Onramp: ARS -> USDC en Stellar
+const providers = await koywe.getPaymentProviders("ARS"); // WIREAR (CVU), QRI-AR (QR)...
+const quote = await koywe.getQuote({ ramp: "onramp", fiatCurrency: "ARS", amount: "10000", paymentMethodId: providers[0].id });
+const order = await koywe.createOnRampOrder({ quoteId: quote.id, stellarAddress: "DIRECCION_STELLAR_DEL_USUARIO" });
+
+order.deposit?.cvu;      // WIREAR: CVU/alias para transferir
+order.interactiveUrl;    // QRI/Khipu: link de checkout hosteado en su lugar
+```
+
+Las direcciones de Stellar se validan localmente (`StrKey` implementado desde cero — sin depender de `@stellar/stellar-sdk`) antes de llegar a la API. Consultá órdenes con `koywe.getOrder(id)` (o `getOrderByExternalId` tras un redirect hosteado); el KYC delegado vive en `createAccount` + `checkAccount`.
+
+## SEP-1 / SEP-10 / SEP-24 — cualquier anchor compatible con SEP
+
+Funciones componibles, agnósticas de framework, para las Stellar Ecosystem Proposals que cubren descubrimiento → autenticación → el flujo hosteado de depósito/retiro. No están atadas a Koywe ni a Etherfuse — apuntalas al dominio de cualquier anchor (un [test anchor](https://testanchor.stellar.org) de referencia, u otro):
+
+```ts
+import { fetchStellarToml, authenticateSep10, startDeposit, getSep24Transaction } from "cosmos-providers";
+
+const toml = await fetchStellarToml("testanchor.stellar.org"); // SEP-1: descubrimiento
+
+// SEP-10: la librería nunca toca claves privadas — traés tu propio signer.
+const jwt = await authenticateSep10({
+  webAuthEndpoint: toml.WEB_AUTH_ENDPOINT,
+  account: "DIRECCION_STELLAR_DEL_USUARIO",
+  sign: (challengeXdr, networkPassphrase) => miWallet.signTransaction(challengeXdr, networkPassphrase),
+});
+
+// SEP-24: iniciás el depósito, abrís `url` para el KYC/monto hosteado, y consultás el estado.
+const { url, id } = await startDeposit({ transferServer: toml.TRANSFER_SERVER_SEP0024, jwt, assetCode: "USDC", account: "DIRECCION_STELLAR_DEL_USUARIO" });
+const tx = await getSep24Transaction({ transferServer: toml.TRANSFER_SERVER_SEP0024, jwt, id });
+```
+
+`startWithdraw` es el espejo de `startDeposit` para la dirección Stellar → fiat. Esto cubre SEP-1/10/24 (descubrimiento, auth y el flujo interactivo que usan la mayoría de anchors y wallets) — SEP-6/12/31/38 (transferencias programáticas, KYC dedicado, pagos fiat directos y cotizaciones) todavía no están implementados.
+
 ## Licencia
 
 MIT

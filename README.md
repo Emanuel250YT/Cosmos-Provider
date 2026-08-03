@@ -1,6 +1,6 @@
 # cosmos-providers
 
-Crypto onramp/offramp toolkit for Latin America. Collect fiat with regional payment rails (Mercado Pago QR & payment links, PIX, SPEI) and release stablecoins automatically, priced with CoinGecko plus your own spread.
+Crypto onramp/offramp toolkit for Latin America. Collect fiat with regional payment rails (Mercado Pago QR & payment links, PIX, SPEI) and release stablecoins automatically, priced with CoinGecko plus your own spread. Also ships full on/off-ramp anchors to USDC on Stellar — Etherfuse, Koywe, and composable SEP-1/10/24 helpers for any SEP-compliant anchor.
 
 **Documentation in other languages:** [Español](./readme/README.es.md) · [Português](./readme/README.pt-BR.md)
 
@@ -17,6 +17,14 @@ Crypto onramp/offramp toolkit for Latin America. Collect fiat with regional paym
 
 ```bash
 npm install cosmos-providers
+```
+
+## Configuration
+
+The library itself never reads `process.env` — every option above is passed in explicitly. `.env.example` documents the variables the scripts in [`examples/`](./examples) read (Mercado Pago, Etherfuse, Koywe, Stellar/SEP), each with a sandbox-safe value or a link to where to get one:
+
+```bash
+cp .env.example .env
 ```
 
 ## Try it locally (no credentials needed)
@@ -275,6 +283,71 @@ const qr = receipt.createPixQr();
 
 Etherfuse webhook verification (Node-only) lives in the `cosmos-providers/webhooks` subpath. See the [examples](./examples) folder for complete flows.
 
+## Koywe client (ARS/CLP/MXN/COP/PEN/BRL ↔ USDC on Stellar)
+
+A dependency-free client for the [Koywe](https://docs-crypto.koywe.com) ramp API. Unlike the `PaymentProvider`s above (which only collect fiat — the crypto leg is your own `settlement`), Koywe delivers USDC directly to a Stellar address as part of the order, so it's exposed as a standalone client, the same way `EtherfuseClient` is:
+
+```ts
+import { KoyweClient } from "cosmos-providers";
+
+const koywe = new KoyweClient({
+  clientId: process.env.KOYWE_CLIENT_ID,
+  secret: process.env.KOYWE_SECRET,
+  baseUrl: process.env.KOYWE_BASE_URL, // https://api-sandbox.koywe.com in sandbox
+  usdcIssuer: process.env.PUBLIC_USDC_ISSUER,
+});
+
+// On-ramp: ARS -> USDC on Stellar
+const providers = await koywe.getPaymentProviders("ARS"); // WIREAR (CVU), QRI-AR (QR)...
+const quote = await koywe.getQuote({ ramp: "onramp", fiatCurrency: "ARS", amount: "10000", paymentMethodId: providers[0].id });
+const order = await koywe.createOnRampOrder({ quoteId: quote.id, stellarAddress: "USER_STELLAR_ADDRESS" });
+
+order.deposit?.cvu;      // WIREAR: CVU/alias to transfer to
+order.interactiveUrl;    // QRI/Khipu: hosted checkout URL instead
+
+// Off-ramp: USDC -> ARS to a registered bank account
+const account = await koywe.createBankAccount({ email, accountNumber, countryCode: "AR", currencySymbol: "ARS" });
+const offQuote = await koywe.getQuote({ ramp: "offramp", fiatCurrency: "ARS", amount: "100" });
+const offOrder = await koywe.createOffRampOrder({ quoteId: offQuote.id, bankAccountId: account.id });
+// user sends USDC to offOrder.depositAddress, then:
+await koywe.submitTxHash(offOrder.id, stellarTxHash);
+```
+
+Stellar addresses are validated locally (a from-scratch `StrKey` check — no `@stellar/stellar-sdk` dependency) before ever reaching the API. Poll orders with `koywe.getOrder(id)` (or `getOrderByExternalId` after a hosted redirect); delegated KYC lives in `createAccount` + `checkAccount`.
+
+## SEP-1 / SEP-10 / SEP-24 — any SEP-compliant anchor
+
+Composable, framework-agnostic functions for the Stellar Ecosystem Proposals that cover discovery → authentication → the hosted deposit/withdraw flow. Not tied to Koywe or Etherfuse — point them at any anchor's domain (a reference [test anchor](https://testanchor.stellar.org), Vibrant, Settle, your own SEP-24 server...):
+
+```ts
+import { fetchStellarToml, authenticateSep10, startDeposit, getSep24Transaction } from "cosmos-providers";
+
+// 1. SEP-1: discover the anchor's endpoints.
+const toml = await fetchStellarToml("testanchor.stellar.org");
+
+// 2. SEP-10: prove control of the account. The library never touches private
+//    keys — bring your own signer (a server-side Keypair, Freighter...).
+const jwt = await authenticateSep10({
+  webAuthEndpoint: toml.WEB_AUTH_ENDPOINT,
+  account: "USER_STELLAR_ADDRESS",
+  sign: (challengeXdr, networkPassphrase) => myWallet.signTransaction(challengeXdr, networkPassphrase),
+});
+
+// 3. SEP-24: kick off a deposit; open `url` for the user's hosted KYC/amount entry.
+const { url, id } = await startDeposit({
+  transferServer: toml.TRANSFER_SERVER_SEP0024,
+  jwt,
+  assetCode: "USDC",
+  account: "USER_STELLAR_ADDRESS",
+});
+
+// 4. Poll until it settles.
+const tx = await getSep24Transaction({ transferServer: toml.TRANSFER_SERVER_SEP0024, jwt, id });
+tx.status; // "completed" | "pending_user_transfer_start" | ... — see SEP24_TERMINAL_STATUSES
+```
+
+`startWithdraw` mirrors `startDeposit` for the Stellar → fiat direction. This covers SEP-1/10/24 (anchor discovery, auth, and the interactive flow that most anchors and wallets build against) — SEP-6/12/31/38 (programmatic transfers, dedicated KYC, direct fiat payments, and quotes) aren't implemented yet.
+
 ## Errors
 
 | Error | Meaning |
@@ -284,6 +357,8 @@ Etherfuse webhook verification (Node-only) lives in the `cosmos-providers/webhoo
 | `SettlementError` | The crypto/fiat leg failed to move |
 | `WebhookSignatureError` | Invalid webhook signature |
 | `CosmosError` | Base class for all of the above |
+| `KoyweError` | A Koywe API call failed (`.code`, `.statusCode`) |
+| `SepError` | A SEP-1/10/24 call failed (`.sep`, `.statusCode`) |
 
 ## Scripts
 

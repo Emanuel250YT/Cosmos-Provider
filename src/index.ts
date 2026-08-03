@@ -71,6 +71,28 @@ export type {
   WebSocketLike,
 } from "@/client/WebSocketManager";
 
+// Koywe anchor (ARS/CLP/MXN/COP/PEN/BRL <-> USDC on Stellar)
+export { KoyweClient, resolveFiatLimits, KoyweError, isValidStellarPublicKey } from "@/client/koywe";
+export type * from "@/client/koywe/types";
+
+// SEP-1 / SEP-10 / SEP-24 — composable helpers for any SEP-compliant anchor
+export {
+  fetchStellarToml,
+  getSep10Challenge,
+  submitSep10Challenge,
+  authenticateSep10,
+  getSep24Info,
+  startDeposit,
+  startWithdraw,
+  getSep24Transaction,
+  listSep24Transactions,
+  SEP24_TERMINAL_STATUSES,
+  SepError,
+  parseToml,
+} from "@/client/sep";
+
+export type * from "@/client/sep/types";
+
 // Organisms (managers)
 export { BaseManager } from "@/organisms/BaseManager";
 export { QuoteManager } from "@/organisms/QuoteManager";
@@ -111,6 +133,7 @@ export {
   PixError,
   WebhookVerificationError,
 } from "@/atoms/errors";
+
 export {
   BASE_URLS,
   Blockchains,
@@ -124,6 +147,7 @@ export {
   TERMINAL_ORDER_STATUSES,
   randomUUID,
 } from "@/atoms/constants";
+
 export type {
   Blockchain,
   Environment,

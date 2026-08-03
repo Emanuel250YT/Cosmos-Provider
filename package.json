@@ -1,7 +1,7 @@
 {
   "name": "cosmos-providers",
   "version": "0.1.0",
-  "description": "Provider-agnostic crypto onramp/offramp toolkit for Latin America: Mercado Pago QR & payment links, PIX, SPEI, CoinGecko pricing with configurable spread, automatic USDC settlement, and signed webhooks. TypeScript, isomorphic (Node >= 18 and browsers).",
+  "description": "Provider-agnostic crypto onramp/offramp toolkit for Latin America: Mercado Pago QR & payment links, PIX, SPEI, Koywe and Etherfuse anchors to USDC on Stellar, composable SEP-1/10/24 helpers, CoinGecko pricing with configurable spread, automatic USDC settlement, and signed webhooks. TypeScript, isomorphic (Node >= 18 and browsers).",
   "keywords": [
     "onramp",
     "offramp",
@@ -15,7 +15,11 @@
     "payments",
     "webhooks",
     "latam",
-    "etherfuse"
+    "etherfuse",
+    "koywe",
+    "stellar",
+    "sep-24",
+    "sep-10"
   ],
   "license": "MIT",
   "author": "Cosmos",
