@@ -57,6 +57,10 @@
     "test:watch": "vitest",
     "test:e2e": "vitest run tests/e2e.test.ts",
     "flow": "tsx examples/full-flow.ts",
+    "flow:mercadopago": "tsx examples/mercadopago-full-flow.ts",
+    "flow:koywe": "tsx examples/koywe-full-flow.ts",
+    "flow:sep": "tsx examples/sep-full-flow.ts",
+    "flow:all": "tsx examples/all-flows.ts",
     "demo": "tsx examples/run-all.ts",
     "demo:ui": "tsx examples/demo-ui.ts",
     "prepublishOnly": "npm run typecheck && npm run build && npm run test"

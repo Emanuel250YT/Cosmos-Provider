@@ -46,12 +46,7 @@ import { randomBytes, generateKeyPairSync } from "node:crypto";
 import { keccak256 } from "js-sha3";
 import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset as StellarAsset, BASE_FEE } from "@stellar/stellar-sdk";
 import { EtherfuseClient, EtherfuseAPIError, Pix, Chain, FiatCurrency, Asset, type Quote, type OrderReceipt } from "../src/index";
-
-const API_KEY = process.env.ETHERFUSE_API_KEY;
-if (!API_KEY) {
-  console.error("Falta ETHERFUSE_API_KEY (ponla en .env o en el entorno). Aborto.");
-  process.exit(1);
-}
+import { isMainModule } from "./helpers/isMain";
 
 /** Moneda que este flujo soporta (Etherfuse liquida solo BRL/MXN hoy). */
 type EtherfuseFiat = typeof FiatCurrency.BRL | typeof FiatCurrency.MXN;
@@ -78,9 +73,10 @@ const FALLBACK_TARGET_ASSET: Record<EtherfuseFiat, Partial<Record<Chain, string>
   },
 };
 
-const client = new EtherfuseClient({ apiKey: API_KEY, environment: "sandbox" });
-client.on("debug", (m) => process.env.DEBUG && console.log(m));
-
+// Se construyen recién dentro de `runEtherfuseFlow()`, solo si hay API key —
+// así este módulo se puede importar (p. ej. desde all-flows.ts) sin
+// necesitar ETHERFUSE_API_KEY configurada.
+let client: EtherfuseClient;
 const stellarServer = new Horizon.Server("https://horizon-testnet.stellar.org");
 
 // ---------------------------------------------------------------------------
@@ -270,7 +266,7 @@ interface ChainResult {
   statusPage?: string;
 }
 
-const chainResults: ChainResult[] = [];
+let chainResults: ChainResult[] = [];
 
 async function runChain(orgId: string, currency: EtherfuseFiat, bankAccountId: string | undefined, chain: Chain) {
   const result: ChainResult = { chain };
@@ -404,7 +400,22 @@ async function runChain(orgId: string, currency: EtherfuseFiat, bankAccountId: s
 // main
 // ---------------------------------------------------------------------------
 
-async function main() {
+/**
+ * Corre el flujo de Etherfuse completo (las 5 chains) y devuelve el detalle
+ * por chain. `null` si falta `ETHERFUSE_API_KEY` — no lanza, para que
+ * `all-flows.ts` pueda saltear esta sección prolijamente y seguir con las
+ * demás.
+ */
+export async function runEtherfuseFlow(): Promise<ChainResult[] | null> {
+  const API_KEY = process.env.ETHERFUSE_API_KEY;
+  if (!API_KEY) {
+    console.error("⚠ Falta ETHERFUSE_API_KEY (ponla en .env) — salteo el flujo de Etherfuse.");
+    return null;
+  }
+  client = new EtherfuseClient({ apiKey: API_KEY, environment: "sandbox" });
+  client.on("debug", (m) => process.env.DEBUG && console.log(m));
+  chainResults = [];
+
   // ── 1. Organización ────────────────────────────────────────────────────
   const me = await client.customers.me();
   console.log(`✔ Organización: ${me.id} (${me.displayName ?? "sin nombre"})`);
@@ -461,11 +472,14 @@ async function main() {
   for (const chain of CHAINS) {
     await runChain(me.id, currency, bankAccountId, chain);
   }
+
+  client.destroy();
+  return chainResults;
 }
 
-function printSummary() {
-  console.log("\n══ Resumen final (todas las chains) ═══════════════════════");
-  for (const r of chainResults) {
+export function printEtherfuseSummary(results: ChainResult[]) {
+  console.log("\n══ Resumen final — Etherfuse (todas las chains) ════════════");
+  for (const r of results) {
     console.log(`\n${r.chain}:`);
     console.log("  Wallet:            ", r.walletAddress ?? `n/a${r.walletError ? ` — error: ${r.walletError}` : ""}`);
     if (r.trustlineTx || r.trustlineError) {
@@ -488,12 +502,13 @@ function printSummary() {
   console.log("\n═════════════════════════════════════════════════════════");
 }
 
-main()
-  .catch((error) => {
-    // Red de seguridad: cada chain atrapa lo suyo, esto no debería disparar.
-    console.error("\n✘ Error inesperado:", error);
-  })
-  .finally(() => {
-    printSummary();
-    client.destroy();
-  });
+if (isMainModule(import.meta.url)) {
+  runEtherfuseFlow()
+    .then((results) => {
+      if (results) printEtherfuseSummary(results);
+    })
+    .catch((error) => {
+      // Red de seguridad: cada chain atrapa lo suyo, esto no debería disparar.
+      console.error("\n✘ Error inesperado:", error);
+    });
+}
