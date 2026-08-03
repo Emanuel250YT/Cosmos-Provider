@@ -18,5 +18,11 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["src", "tests", "vitest.config.ts"]
+  "include": ["src", "tests", "examples", "vitest.config.ts"],
+  "exclude": [
+    // Illustrative snippets only — not meant to run standalone, and don't
+    // pull in react/express as real dependencies just to type-check them.
+    "examples/frontend-pix-qr.tsx",
+    "examples/webhook-server.ts"
+  ]
 }

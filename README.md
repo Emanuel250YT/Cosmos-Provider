@@ -348,6 +348,22 @@ tx.status; // "completed" | "pending_user_transfer_start" | ... — see SEP24_TE
 
 `startWithdraw` mirrors `startDeposit` for the Stellar → fiat direction. This covers SEP-1/10/24 (anchor discovery, auth, and the interactive flow that most anchors and wallets build against) — SEP-6/12/31/38 (programmatic transfers, dedicated KYC, direct fiat payments, and quotes) aren't implemented yet.
 
+## Standard identifiers: Chain, Asset, FiatCurrency, Country
+
+Every provider/client in this library shares one set of identifiers instead of scattering raw string literals — `Chain.Stellar` instead of `"stellar"`, `Asset.USDC` instead of `"USDC"`. A typo becomes a compile error instead of a silent 404:
+
+```ts
+import { Chain, Asset, FiatCurrency, Country } from "cosmos-providers";
+
+Chain.Stellar;       // "stellar" — also: Solana, Base, Polygon, Monad
+Asset.USDC;          // "USDC" — also: USDT, DAI, BTC, ETH, SOL, XLM, and Etherfuse's
+                     // own stablebonds: CETES, TESOURO, CARN, JOGO
+FiatCurrency.ARS;    // "ARS" — also: BRL, MXN, CLP, COP, PEN, UYU
+Country.AR;          // "AR" — also: BR, MX, CL, CO, PE, UY
+```
+
+Each is a frozen const object that also works as a type (`function f(c: Chain) {}` and `f(Chain.Stellar)` both type-check) — a `Chain` **is** the string `"stellar"` at runtime, so this is purely a typed front door: existing code that already passes plain strings keeps working unchanged. Stablebond addresses (which mint on which chain) are deliberately **not** baked into `Asset` — resolve those at runtime from `client.lookup.stablebonds()` or `client.assets.list()`, never hardcode them (see the [Etherfuse client](#etherfuse-client-pixspei-ramp-api) section).
+
 ## Errors
 
 | Error | Meaning |

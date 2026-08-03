@@ -5,6 +5,8 @@
  * an endpoint, fix it here and the whole library inherits the change.
  */
 
+import { Chain, FiatCurrency } from "@/atoms/enums";
+
 export const Environments = {
   Sandbox: "sandbox",
   Production: "production",
@@ -17,24 +19,24 @@ export const BASE_URLS: Record<Environment, string> = {
   production: "https://api.etherfuse.com",
 };
 
-export const Blockchains = {
-  Stellar: "stellar",
-  Solana: "solana",
-  Base: "base",
-  Polygon: "polygon",
-  Monad: "monad",
-} as const;
+/**
+ * @deprecated Use {@link Chain} from `@/atoms/enums` (same values, same
+ * object — kept here so existing `Blockchains`/`Blockchain` imports don't
+ * break).
+ */
+export const Blockchains = Chain;
+/** @deprecated Use {@link Chain} from `@/atoms/enums`. */
+export type Blockchain = Chain;
 
-export type Blockchain = (typeof Blockchains)[keyof typeof Blockchains];
-
-export const FiatCurrencies = {
-  /** Peso mexicano — liquidación vía SPEI/CLABE. */
-  MXN: "MXN",
-  /** Real brasileño — liquidación vía PIX. */
-  BRL: "BRL",
-} as const;
-
-export type FiatCurrency = (typeof FiatCurrencies)[keyof typeof FiatCurrencies];
+/**
+ * @deprecated Use {@link FiatCurrency} from `@/atoms/enums` (same values,
+ * same object — kept here so existing `FiatCurrencies`/`FiatCurrency`
+ * imports don't break). Etherfuse itself only settles BRL/MXN today; the
+ * other markets in the shared enum are for Mercado Pago/Koywe.
+ */
+export const FiatCurrencies = FiatCurrency;
+/** @deprecated Use {@link FiatCurrency} from `@/atoms/enums`. */
+export type { FiatCurrency };
 
 export const OrderDirections = {
   Onramp: "onramp",

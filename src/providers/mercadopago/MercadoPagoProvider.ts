@@ -13,6 +13,7 @@
  *                the account.
  */
 
+import { Country, FiatCurrency } from "@/atoms/enums";
 import { ProviderError } from "@/core/errors";
 import { hmacSha256Hex, timingSafeEqualStr } from "@/core/signature";
 import type {
@@ -29,8 +30,24 @@ import type {
 
 const MP_BASE_URL = "https://api.mercadopago.com";
 
-const MP_REGIONS = ["AR", "BR", "MX", "CL", "CO", "PE", "UY"] as const;
-const MP_CURRENCIES = ["ARS", "BRL", "MXN", "CLP", "COP", "PEN", "UYU"] as const;
+const MP_REGIONS = [
+  Country.AR,
+  Country.BR,
+  Country.MX,
+  Country.CL,
+  Country.CO,
+  Country.PE,
+  Country.UY,
+] as const;
+const MP_CURRENCIES = [
+  FiatCurrency.ARS,
+  FiatCurrency.BRL,
+  FiatCurrency.MXN,
+  FiatCurrency.CLP,
+  FiatCurrency.COP,
+  FiatCurrency.PEN,
+  FiatCurrency.UYU,
+] as const;
 
 /** Mercado Pago payment status → normalized ChargeStatus. */
 const STATUS_MAP: Record<string, ChargeStatus> = {
@@ -121,7 +138,7 @@ export class MercadoPagoProvider implements PaymentProvider {
     const method = request.method === "auto" ? this.#pickMethod(request) : request.method;
 
     if (method === "qr") {
-      if (request.currency.toUpperCase() === "BRL") return this.#createPixCharge(request);
+      if (request.currency.toUpperCase() === FiatCurrency.BRL) return this.#createPixCharge(request);
       if (this.#qrPos) return this.#createInStoreQrCharge(request);
       // No POS configured for this region — a payment link is the closest rail.
       return this.#createPreferenceCharge(request);
@@ -135,7 +152,7 @@ export class MercadoPagoProvider implements PaymentProvider {
   }
 
   #pickMethod(request: CreateChargeRequest): "qr" | "link" {
-    return request.currency.toUpperCase() === "BRL" || this.#qrPos ? "qr" : "link";
+    return request.currency.toUpperCase() === FiatCurrency.BRL || this.#qrPos ? "qr" : "link";
   }
 
   /** Checkout Pro preference → hosted payment link (`init_point`). */

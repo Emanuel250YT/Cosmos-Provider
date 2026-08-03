@@ -26,6 +26,7 @@
  * ```
  */
 
+import { Asset, FiatCurrency } from "@/atoms/enums";
 import { KoyweError } from "./errors";
 import { isValidStellarPublicKey } from "./stellarKey";
 import type {
@@ -59,9 +60,9 @@ import type {
 } from "./types";
 
 /** Koywe's symbol for USDC on Stellar in quote/order requests. */
-const USDC_STELLAR_SYMBOL = "USDC Stellar";
+const USDC_STELLAR_SYMBOL = `${Asset.USDC} Stellar`;
 /** The display symbol exposed to callers for the Stellar leg. */
-const USDC_DISPLAY_SYMBOL = "USDC";
+const USDC_DISPLAY_SYMBOL: Asset = Asset.USDC;
 
 /**
  * Client for the Koywe crypto fiat on/off-ramp API.
@@ -78,7 +79,14 @@ export class KoyweClient {
   /** Tokens Koywe can deliver on Stellar. The issuer is injected from config. */
   readonly supportedTokens: readonly KoyweTokenInfo[];
   /** ISO 4217 fiat currency codes supported by Koywe. */
-  readonly supportedCurrencies: readonly string[] = ["ARS", "CLP", "MXN", "COP", "PEN", "BRL"];
+  readonly supportedCurrencies: readonly FiatCurrency[] = [
+    FiatCurrency.ARS,
+    FiatCurrency.CLP,
+    FiatCurrency.MXN,
+    FiatCurrency.COP,
+    FiatCurrency.PEN,
+    FiatCurrency.BRL,
+  ];
   /** Local payment rails surfaced for Koywe (per market). */
   readonly supportedRails: readonly KoyweRail[] = ["wirear", "qri", "spei", "pse"];
 

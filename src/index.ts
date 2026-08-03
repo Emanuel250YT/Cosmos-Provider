@@ -151,11 +151,15 @@ export {
 export type {
   Blockchain,
   Environment,
-  FiatCurrency,
   OrderDirection,
   OrderStatus,
   PixKeyType,
 } from "@/atoms/constants";
+
+// Standard chain/asset/currency/country identifiers — the single source
+// every provider/client in this library uses instead of raw string literals
+// (`Chain.Stellar`, `Asset.USDC`, `FiatCurrency.ARS`, `Country.BR`...).
+export { Chain, Asset, FiatCurrency, Country } from "@/atoms/enums";
 
 // Tipos de la API
 export type * from "@/types/index";

@@ -6,18 +6,19 @@
  * burst of quotes doesn't hit the API on every call.
  */
 
+import { Asset } from "@/atoms/enums";
 import { OracleError } from "@/core/errors";
 import type { CryptoAssetCode, FiatCurrencyCode, RateOracle } from "@/core/types";
 
 /** Common symbols mapped to CoinGecko coin ids. Extendable via options. */
 const DEFAULT_COIN_IDS: Record<string, string> = {
-  USDC: "usd-coin",
-  USDT: "tether",
-  DAI: "dai",
-  BTC: "bitcoin",
-  ETH: "ethereum",
-  SOL: "solana",
-  XLM: "stellar",
+  [Asset.USDC]: "usd-coin",
+  [Asset.USDT]: "tether",
+  [Asset.DAI]: "dai",
+  [Asset.BTC]: "bitcoin",
+  [Asset.ETH]: "ethereum",
+  [Asset.SOL]: "solana",
+  [Asset.XLM]: "stellar",
 };
 
 export interface CoinGeckoOracleOptions {
