@@ -148,6 +148,58 @@ describe("MercadoPagoProvider charges", () => {
     });
   });
 
+  it("detects sandbox mode from TEST- tokens and prefers sandbox_init_point", async () => {
+    const { fetchImpl } = createMockFetch([
+      {
+        route: "POST /checkout/preferences",
+        response: {
+          id: "pref-sbx",
+          init_point: "https://mp.example/prod/pref-sbx",
+          sandbox_init_point: "https://sandbox.mp.example/pref-sbx",
+        },
+      },
+    ]);
+    const mp = provider(fetchImpl); // accessToken: "TEST-token"
+    expect(mp.sandbox).toBe(true);
+
+    const charge = await mp.createCharge({
+      amount: 1000,
+      currency: "ARS",
+      method: "link",
+      reference: "order-sbx",
+    });
+    expect(charge.link).toBe("https://sandbox.mp.example/pref-sbx");
+  });
+
+  it("prefers init_point on production credentials", async () => {
+    const { fetchImpl } = createMockFetch([
+      {
+        route: "POST /checkout/preferences",
+        response: {
+          id: "pref-prod",
+          init_point: "https://mp.example/prod/pref-prod",
+          sandbox_init_point: "https://sandbox.mp.example/pref-prod",
+        },
+      },
+    ]);
+    const mp = new MercadoPagoProvider({ accessToken: "APP_USR-token", fetch: fetchImpl });
+    expect(mp.sandbox).toBe(false);
+
+    const charge = await mp.createCharge({
+      amount: 1000,
+      currency: "ARS",
+      method: "link",
+      reference: "order-prod",
+    });
+    expect(charge.link).toBe("https://mp.example/prod/pref-prod");
+  });
+
+  it("allows overriding sandbox detection explicitly", () => {
+    const { fetchImpl } = createMockFetch([]);
+    const mp = new MercadoPagoProvider({ accessToken: "APP_USR-token", sandbox: true, fetch: fetchImpl });
+    expect(mp.sandbox).toBe(true);
+  });
+
   it("normalizes payment states", async () => {
     const { fetchImpl } = createMockFetch([
       {
@@ -210,6 +262,21 @@ describe("MercadoPagoProvider webhooks", () => {
   it("accepts everything when no secret is configured", async () => {
     const { fetchImpl } = createMockFetch([]);
     expect(await provider(fetchImpl).verifyWebhook({ body: "{}", headers: {} })).toBe(true);
+  });
+
+  it("builds signed test webhooks that pass its own verification", async () => {
+    const { fetchImpl } = createMockFetch([]);
+    const mp = provider(fetchImpl, { webhookSecret: SECRET });
+
+    const request = await mp.buildTestWebhook(12345);
+    expect(await mp.verifyWebhook(request)).toBe(true);
+
+    const notification = await mp.parseWebhook(request);
+    expect(notification).toMatchObject({ chargeId: "12345", kind: "payment" });
+
+    // Tampering with the payment id must break the signature.
+    request.query!["data.id"] = "99999";
+    expect(await mp.verifyWebhook(request)).toBe(false);
   });
 
   it("parses payment notifications from body or query", async () => {

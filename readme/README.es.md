@@ -136,7 +136,71 @@ await ramp.confirmCryptoReceived(order.id, { txId: "..." });
 | `"qr"` (con `qrPos`) | QR dinámico in-store de Mercado Pago |
 | `"auto"` | El mejor método para la moneda (default) |
 
-Cualquier otro riel se puede enchufar implementando la interfaz `PaymentProvider` (crear cobro, consultar cobro, verificar/parsear webhook, payout opcional).
+Cualquier otro riel se puede enchufar con `createCustomProvider` (ver abajo) o implementando la interfaz `PaymentProvider` directamente.
+
+## Sandbox de Mercado Pago
+
+Pasá un access token `TEST-...` y el proveedor entra en modo sandbox automáticamente (o forzalo con `sandbox: true`): los links de pago usan `sandbox_init_point`, así que todo el flujo se puede probar con [usuarios y tarjetas de prueba](https://www.mercadopago.com.ar/developers/es/docs/checkout-pro/additional-content/your-integrations/test/accounts) antes de salir a producción.
+
+```ts
+const mp = new MercadoPagoProvider({
+  accessToken: process.env.MP_TEST_ACCESS_TOKEN, // "TEST-..." → mp.sandbox === true
+  webhookSecret: process.env.MP_WEBHOOK_SECRET,
+});
+```
+
+Para probar webhooks sin exponer una URL pública, generá una notificación firmada de un pago sandbox y pasásela directo al motor — ejercita el pipeline real (verificación de firma → parseo → re-consulta a la API → settlement):
+
+```ts
+const request = await mp.buildTestWebhook(paymentId); // firmado exactamente como lo haría Mercado Pago
+const result = await ramp.handleWebhook("mercadopago", request);
+// → { ok: true, outcome: "settled", orderId: "..." }
+```
+
+## Proveedores custom
+
+Convertí cualquier API de pagos en un proveedor completo — links de pago, QRs, normalización de estados y webhooks incluidos — sin implementar `PaymentProvider` a mano. Vos ponés las llamadas crudas a tu API; las respuestas se adaptan al formato Cosmos automáticamente:
+
+```ts
+import { createCustomProvider } from "cosmos-providers";
+
+const acme = createCustomProvider({
+  name: "acme",
+  currencies: ["ARS"],
+
+  // Llamadas crudas a tu API — devolvé la respuesta tal cual.
+  createCharge: (req) => acmeApi.post("/charges", { amount: req.amount, ref: req.reference }),
+  getCharge: (id) => acmeApi.get(`/charges/${id}`),
+  createPayout: (req) => acmeApi.post("/payouts", req), // opcional
+
+  // Mapeá estados del proveedor a: pending | approved | rejected | refunded | canceled | expired.
+  // Hay una tabla de alias incorporada ("paid"/"succeeded" → approved, ...); los estados
+  // desconocidos resuelven a "pending" — nunca a una aprobación falsa.
+  statusMap: { ok_dale: "approved" },
+
+  // Webhooks: HMAC-SHA256 de fábrica, o traé tu propio verify/parse.
+  webhook: {
+    hmac: { secret: process.env.ACME_WEBHOOK_SECRET, header: "x-acme-signature" },
+    chargeIdPaths: ["data.id"], // dónde vive el id del pago (este es el default)
+  },
+});
+
+const ramp = new CosmosRamp({ providers: [acme], /* ... */ });
+```
+
+Los campos comunes de respuesta (`checkout_url`, `init_point`, `payment_url`, `qr_code`, `qr_code_base64`, `transaction_amount`, `external_reference`, objetos anidados `data`/`payment`...) se auto-mapean. Para formatos raros, tomá control total con `adapt`:
+
+```ts
+createCustomProvider({
+  // ...
+  adapt: {
+    charge: (raw) => ({ id: raw.tx.id, link: raw.tx.hosted_page }),
+    chargeState: (raw) => ({ status: raw.tx.phase, amount: raw.tx.cents / 100 }),
+  },
+});
+```
+
+Lo que devuelvan los adaptadores igual se normaliza y valida (un cobro sin link/QR/depósito falla rápido al crearse), así que `ramp.handleWebhook` y `order.charge.link` se comportan idéntico entre proveedores incorporados y custom.
 
 ## Emitir tus propios webhooks
 

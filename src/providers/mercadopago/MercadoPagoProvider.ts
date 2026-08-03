@@ -51,6 +51,13 @@ export interface MercadoPagoProviderOptions {
   /** Access token (`APP_USR-...` in production, `TEST-...` in sandbox). */
   accessToken: string;
   /**
+   * Sandbox mode. Defaults to auto-detection from the access token
+   * (`TEST-...` → sandbox). In sandbox mode payment links prefer
+   * `sandbox_init_point`, so the whole flow is testable with test users
+   * and test cards before going live.
+   */
+  sandbox?: boolean;
+  /**
    * Webhook secret from the Mercado Pago dashboard, used to verify the
    * `x-signature` header. Strongly recommended — without it, webhooks are
    * accepted unverified.
@@ -79,6 +86,8 @@ export class MercadoPagoProvider implements PaymentProvider {
   readonly regions = MP_REGIONS;
   readonly currencies = MP_CURRENCIES;
   readonly baseUrl: string;
+  /** Whether the provider runs against sandbox (test) credentials. */
+  readonly sandbox: boolean;
 
   #accessToken: string;
   #webhookSecret?: string;
@@ -92,6 +101,7 @@ export class MercadoPagoProvider implements PaymentProvider {
       throw new ProviderError(this.name, "`accessToken` is required.");
     }
     this.#accessToken = options.accessToken;
+    this.sandbox = options.sandbox ?? options.accessToken.startsWith("TEST-");
     this.#webhookSecret = options.webhookSecret;
     this.#notificationUrl = options.notificationUrl;
     this.#defaultPayerEmail = options.defaultPayerEmail;
@@ -161,7 +171,11 @@ export class MercadoPagoProvider implements PaymentProvider {
     return {
       id: preference.id,
       method: "link",
-      link: preference.init_point ?? preference.sandbox_init_point,
+      // Sandbox checkouts must go through `sandbox_init_point`; a production
+      // link on test credentials renders an unusable checkout (and vice versa).
+      link: this.sandbox
+        ? (preference.sandbox_init_point ?? preference.init_point)
+        : (preference.init_point ?? preference.sandbox_init_point),
       expiresAt: request.expiresInMinutes ? Date.now() + request.expiresInMinutes * 60_000 : undefined,
       raw: preference,
     };
@@ -310,6 +324,42 @@ export class MercadoPagoProvider implements PaymentProvider {
     if (kind !== "payment" || !paymentId) return null;
 
     return { chargeId: String(paymentId), kind, raw: body };
+  }
+
+  /**
+   * Build a correctly signed `WebhookRequest` for a payment id, exactly as
+   * Mercado Pago would send it (`x-signature: ts=...,v1=...` over the
+   * `id:...;request-id:...;ts:...;` manifest).
+   *
+   * Meant for sandbox/local testing: create a test payment, then feed the
+   * result straight into `ramp.handleWebhook("mercadopago", request)` (or
+   * POST it to your endpoint) to exercise the full verify → parse → fetch →
+   * settle pipeline without exposing a public URL.
+   */
+  async buildTestWebhook(
+    paymentId: string | number,
+    options?: { requestId?: string; ts?: number; action?: string },
+  ): Promise<WebhookRequest> {
+    const id = String(paymentId);
+    const ts = String(options?.ts ?? Math.floor(Date.now() / 1000));
+    const requestId = options?.requestId ?? `test-${ts}`;
+
+    const headers: Record<string, string> = { "x-request-id": requestId };
+    if (this.#webhookSecret) {
+      const manifest = `id:${id.toLowerCase()};request-id:${requestId};ts:${ts};`;
+      const v1 = await hmacSha256Hex(this.#webhookSecret, manifest);
+      headers["x-signature"] = `ts=${ts},v1=${v1}`;
+    }
+
+    return {
+      body: JSON.stringify({
+        type: "payment",
+        action: options?.action ?? "payment.updated",
+        data: { id },
+      }),
+      headers,
+      query: { "data.id": id },
+    };
   }
 
   #extractPaymentId(request: WebhookRequest): string | undefined {

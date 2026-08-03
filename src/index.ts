@@ -35,6 +35,16 @@ export type { CoinGeckoOracleOptions } from "@/oracles/CoinGeckoOracle";
 // Payment providers
 export { MercadoPagoProvider } from "@/providers/mercadopago/MercadoPagoProvider";
 export type { MercadoPagoProviderOptions } from "@/providers/mercadopago/MercadoPagoProvider";
+export {
+  CustomProvider,
+  createCustomProvider,
+  DEFAULT_STATUS_ALIASES,
+} from "@/providers/custom/CustomProvider";
+export type {
+  CustomProviderConfig,
+  CustomAdapters,
+  CustomWebhookConfig,
+} from "@/providers/custom/CustomProvider";
 
 // Outgoing webhooks (signed deliveries) + receiver-side verification
 export {
