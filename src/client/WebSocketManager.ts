@@ -22,6 +22,7 @@ export interface WebSocketLike {
 export type WebSocketConstructorLike = new (url: string) => WebSocketLike;
 
 export interface OrderUpdatedPayload {
+  /** Id de la orden que cambió, tal como vino en el frame del WebSocket. */
   orderId: string;
   /** Orden re-leída vía REST; `null` si la hidratación falló o está desactivada. */
   order: Order | null;
@@ -38,6 +39,7 @@ export class WebSocketManager {
     this.#client = client;
   }
 
+  /** `true` si el socket está abierto (`readyState === 1`, `OPEN` en la spec de WebSocket). */
   get connected(): boolean {
     return this.#socket !== null && this.#socket.readyState === 1;
   }

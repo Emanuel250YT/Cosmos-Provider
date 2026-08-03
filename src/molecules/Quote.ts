@@ -5,10 +5,12 @@ import type { OrderReceipt } from "@/molecules/Order";
 import { Base } from "@/molecules/Base";
 
 export class Quote extends Base<APIQuote> {
+  /** Id de esta cotización — se pasa como `quoteId` al crear la orden. */
   get id(): string {
     return this.raw.quoteId;
   }
 
+  /** Momento exacto en que deja de ser válida para crear una orden. */
   get expiresAt(): Date {
     return new Date(this.raw.expiresAt);
   }
@@ -18,6 +20,7 @@ export class Quote extends Base<APIQuote> {
     return this.expiresAt.getTime() - Date.now();
   }
 
+  /** `true` si ya pasó `expiresAt` — crear una orden con esta quote fallará. */
   get isExpired(): boolean {
     return this.expiresIn <= 0;
   }
@@ -27,6 +30,7 @@ export class Quote extends Base<APIQuote> {
     return this.raw.destinationAmount;
   }
 
+  /** Tasa de cambio aplicada, congelada al momento de pedir la quote. */
   get exchangeRate(): string {
     return this.raw.exchangeRate;
   }

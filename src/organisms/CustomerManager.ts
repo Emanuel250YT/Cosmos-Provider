@@ -12,11 +12,13 @@ export class CustomerManager extends BaseManager {
     return new Customer(this.client, raw);
   }
 
+  /** Un customer hijo por id. */
   async fetch(customerId: string): Promise<Customer> {
     const raw = await this.rest.get<APICustomer>(Routes.customerById(customerId));
     return new Customer(this.client, raw);
   }
 
+  /** Lista paginada de customers hijos de tu organización. */
   async list(query: PageQuery = {}): Promise<Page<Customer>> {
     const raw = await this.rest.get<Page<APICustomer>>(Routes.customers(), {
       query: { pageNumber: query.pageNumber, pageSize: query.pageSize },

@@ -15,17 +15,20 @@ export class WebhookManager extends BaseManager {
     return new Webhook(this.client, raw);
   }
 
+  /** Un endpoint de webhook por id. La respuesta NO trae `secret` (solo se ve una vez, al crear). */
   async fetch(webhookId: string): Promise<Webhook> {
     const raw = await this.rest.get<APIWebhook>(Routes.webhookById(webhookId));
     return new Webhook(this.client, raw);
   }
 
+  /** Lista todos los endpoints de webhook registrados. */
   async list(): Promise<Webhook[]> {
     const raw = await this.rest.get<APIWebhook[] | { items?: APIWebhook[] }>(Routes.webhooks());
     const items = Array.isArray(raw) ? raw : (raw.items ?? []);
     return items.map((w) => new Webhook(this.client, w));
   }
 
+  /** Da de baja un endpoint de webhook. */
   delete(webhookId: string): Promise<unknown> {
     return this.rest.delete(Routes.webhookById(webhookId));
   }

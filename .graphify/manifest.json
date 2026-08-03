@@ -1,186 +1,422 @@
 {
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/examples/backend-pix-onramp.ts": {
-    "mtime": 1785610662593.2065,
-    "hash": "c53decd1621b8c92d517fd6f51a8298c"
+  "examples/backend-pix-onramp.ts": {
+    "mtime": 1785778088.3154917,
+    "ast_hash": "8c9e520093fc7b1c20dc73d8c5bd7b95",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/examples/frontend-pix-qr.tsx": {
-    "mtime": 1785610672074.6106,
-    "hash": "3b4b36e0b3388c0bec722e224f4cdda2"
+  "examples/confirm-order-on-return.ts": {
+    "mtime": 1785783073.4403336,
+    "ast_hash": "77747ce30e801cba80fb580aab223fa6",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/examples/full-flow.ts": {
-    "mtime": 1785611165987.6362,
-    "hash": "c387618c8b69114b404a6a0ed3f73561"
+  "examples/demo-ui.ts": {
+    "mtime": 1785778088.319711,
+    "ast_hash": "54cd3ff258e78c1c749b37f975147c10",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/examples/webhook-server.ts": {
-    "mtime": 1785610677023.0076,
-    "hash": "f86c77a39fb3a258b215ad66e612d190"
+  "examples/frontend-pix-qr.tsx": {
+    "mtime": 1785778088.3237705,
+    "ast_hash": "c430f37fd0f692a9fda17f0b630e1073",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/atoms/EventEmitter.ts": {
-    "mtime": 1785610579235.6914,
-    "hash": "66c81dde75f2e3e943aab84337367477"
+  "examples/full-flow.ts": {
+    "mtime": 1785778088.3280318,
+    "ast_hash": "a7ec9bf376d62146542f02ed4622cd81",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/atoms/REST.ts": {
-    "mtime": 1785610940344.549,
-    "hash": "c9cc5a680be395cf11c11e1c927dc75f"
+  "examples/helpers/mock-mercadopago.ts": {
+    "mtime": 1785778088.3341782,
+    "ast_hash": "cf4ca0a052e77e0f3883d8456bc207ef",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/atoms/constants.ts": {
-    "mtime": 1785610223340.9194,
-    "hash": "78d0eb337a81cbc016283abf7e2d9588"
+  "examples/mercadopago-webhook-server.ts": {
+    "mtime": 1785778088.338305,
+    "ast_hash": "93eb70ac549224481f21311002d37d9b",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/atoms/crc16.ts": {
-    "mtime": 1785610241470.5005,
-    "hash": "804cebf594c5f5c0db0388a38337c381"
+  "examples/quickstart.ts": {
+    "mtime": 1785778088.3404512,
+    "ast_hash": "d24f8372ee13909bb8c7e4b4e6b3a673",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/atoms/errors.ts": {
-    "mtime": 1785610232262.1086,
-    "hash": "22d7370acad8592b47c862e4725a0fbd"
+  "examples/run-all.ts": {
+    "mtime": 1785778088.3465219,
+    "ast_hash": "ef6a68049883820a180253c63fb478e9",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/client/EtherfuseClient.ts": {
-    "mtime": 1785610940346.5493,
-    "hash": "c04a124a1777b081f6865f3aace0916f"
+  "examples/webhook-server.ts": {
+    "mtime": 1785778088.3486485,
+    "ast_hash": "efac2b5a1d489026255025b9e3ea6495",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/client/LookupClient.ts": {
-    "mtime": 1785610940347.5493,
-    "hash": "013f643a7648c569cceb47125a554944"
+  "package.json": {
+    "mtime": 1785782255.7365532,
+    "ast_hash": "fb0bba3bba192732d00c392db3ba25fc",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/client/WebSocketManager.ts": {
-    "mtime": 1785610940348.548,
-    "hash": "a8bbfac8d3846efd4623c069b24320d3"
+  "src/atoms/EventEmitter.ts": {
+    "mtime": 1785783927.4593275,
+    "ast_hash": "7776dc659e2f290969f3679154e5ea1b",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/index.ts": {
-    "mtime": 1785610940349.5488,
-    "hash": "ef5bec788c08d8a2b4658eab12055e1c"
+  "src/atoms/REST.ts": {
+    "mtime": 1785784125.2143571,
+    "ast_hash": "f1c4e593d6c763809469dd3017a9dfba",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/BankAccount.ts": {
-    "mtime": 1785610940349.5488,
-    "hash": "65f4323a3f07728ef0d232c383ec3b8c"
+  "src/atoms/constants.ts": {
+    "mtime": 1785778088.3817234,
+    "ast_hash": "4d160083bd990583fb469f96afd6258a",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/Base.ts": {
-    "mtime": 1785610940350.5483,
-    "hash": "56c645e879d551d48560245a64cf7f67"
+  "src/atoms/crc16.ts": {
+    "mtime": 1785778088.3857856,
+    "ast_hash": "f5944c44725f7d2169637c08fae112d0",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/Customer.ts": {
-    "mtime": 1785610940351.5483,
-    "hash": "fa435a62b58b9551addf0db82e04423c"
+  "src/atoms/errors.ts": {
+    "mtime": 1785778088.3888352,
+    "ast_hash": "3cf0abf8d5a69975c93eef8613bd1444",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/Order.ts": {
-    "mtime": 1785610940351.5483,
-    "hash": "f2a5e9e212a7f8654e76457cf9d32bcd"
+  "src/client/EtherfuseClient.ts": {
+    "mtime": 1785778088.3947556,
+    "ast_hash": "f977acef8ac70925cadc9c07301ac9fa",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/Pix.ts": {
-    "mtime": 1785610940352.5493,
-    "hash": "87ffa22c8fdb45d5ee9411d42e154e9c"
+  "src/client/LookupClient.ts": {
+    "mtime": 1785784082.96715,
+    "ast_hash": "e26f47512986f2ceb279306a5163f091",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/Quote.ts": {
-    "mtime": 1785610940353.5498,
-    "hash": "5285c5e0ec7a8094c2a88b564be0d62a"
+  "src/client/WebSocketManager.ts": {
+    "mtime": 1785784092.3958533,
+    "ast_hash": "4e72524c18c46deeb7fa9ace68068705",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/Wallet.ts": {
-    "mtime": 1785610940353.5498,
-    "hash": "eae08b914df3dba446e9f91ca585ac7e"
+  "src/client/koywe/KoyweClient.ts": {
+    "mtime": 1785781668.328833,
+    "ast_hash": "ad56110d8e5f32fc1604ccd43bbc6194",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/molecules/Webhook.ts": {
-    "mtime": 1785610940354.55,
-    "hash": "cfcce333ff90f5a9d9316fb2cfaad314"
+  "src/client/koywe/errors.ts": {
+    "mtime": 1785781570.6805687,
+    "ast_hash": "132e5324bbe63fccec63fde2fb4fd4fb",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/AssetManager.ts": {
-    "mtime": 1785610940354.55,
-    "hash": "c9db0612123018e26d5241045692fa30"
+  "src/client/koywe/index.ts": {
+    "mtime": 1785781674.357072,
+    "ast_hash": "dd6aa0ff252f02c82c1713f45fdf9782",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/BankAccountManager.ts": {
-    "mtime": 1785610940355.5493,
-    "hash": "177a09c143ccb0447f8c240037fe30da"
+  "src/client/koywe/stellarKey.ts": {
+    "mtime": 1785781578.4296255,
+    "ast_hash": "6a3467400a82cee9b34c28472582aaf2",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/BaseManager.ts": {
-    "mtime": 1785610940355.5493,
-    "hash": "14661bbf61b8969054e66a8356526799"
+  "src/client/koywe/types.ts": {
+    "mtime": 1785781602.6991603,
+    "ast_hash": "f84002821d41d5f8463dfe4ae8267716",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/CustomerManager.ts": {
-    "mtime": 1785610940356.5493,
-    "hash": "e920039e0af46315a7e048552d23986c"
+  "src/client/sep/errors.ts": {
+    "mtime": 1785781701.4773247,
+    "ast_hash": "912e29edb3bd3bdc4671eaeef0229076",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/LookupManager.ts": {
-    "mtime": 1785610940356.5493,
-    "hash": "c86fb651bf16e191c4c6a2783b88418c"
+  "src/client/sep/index.ts": {
+    "mtime": 1785781771.1861444,
+    "ast_hash": "149ee8d4fc7822545cdcf21d059a1dd3",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/OrderManager.ts": {
-    "mtime": 1785610940357.5493,
-    "hash": "494130d0dade7c54579705bec8ad60e2"
+  "src/client/sep/sep1.ts": {
+    "mtime": 1785781730.4662836,
+    "ast_hash": "9da5994eea922b2468ff918d18a033ac",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/QuoteManager.ts": {
-    "mtime": 1785610940357.5493,
-    "hash": "23a0734060db9279f9781fff9d25bafe"
+  "src/client/sep/sep10.ts": {
+    "mtime": 1785781746.5030766,
+    "ast_hash": "8032d54c376d442403e992f0afa177c6",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/SandboxManager.ts": {
-    "mtime": 1785610940358.5476,
-    "hash": "9365318e5376cb3b2f88b3407a8f42ba"
+  "src/client/sep/sep24.ts": {
+    "mtime": 1785781767.0249453,
+    "ast_hash": "0899828d3eef2af253fc8d5cec28fd58",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/SwapManager.ts": {
-    "mtime": 1785610940358.5476,
-    "hash": "e009fcbb96855acf2173dc9e6aaeacf2"
+  "src/client/sep/toml.ts": {
+    "mtime": 1785781709.7425115,
+    "ast_hash": "96618d3705cb7703938223a8ab6abd49",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/WalletManager.ts": {
-    "mtime": 1785610940359.548,
-    "hash": "0cf85303fde5b46f92040d78bc9e9982"
+  "src/client/sep/types.ts": {
+    "mtime": 1785781723.1859457,
+    "ast_hash": "c203a972cce1f18ee8253519e909c68d",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/organisms/WebhookManager.ts": {
-    "mtime": 1785610940359.548,
-    "hash": "e8259c5c0be0d13df22a70ddd668a285"
+  "src/core/CosmosRamp.ts": {
+    "mtime": 1785778088.406935,
+    "ast_hash": "db074f9ebd44c4142c655bc8eb3f1d27",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/types/index.ts": {
-    "mtime": 1785610940360.5488,
-    "hash": "b62b64dbda836b366e9187b0a7e22c05"
+  "src/core/MemoryStore.ts": {
+    "mtime": 1785784139.333991,
+    "ast_hash": "9c1ee1506e59a16d03d3b043300609ae",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/src/webhooks/index.ts": {
-    "mtime": 1785610940360.5488,
-    "hash": "99dc4936685e49ee2ed1c327c644cca8"
+  "src/core/errors.ts": {
+    "mtime": 1785778088.4131877,
+    "ast_hash": "3357d017024162cb63a1795dca77f05d",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/crc16.test.ts": {
-    "mtime": 1785611003750.1208,
-    "hash": "2f9f2e425acf98d4506abe8cf6848fb2"
+  "src/core/signature.ts": {
+    "mtime": 1785778088.4172363,
+    "ast_hash": "a9c5a0d877188cf47d6c360f8c8f86a6",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/e2e.test.ts": {
-    "mtime": 1785611142638.2373,
-    "hash": "7ea95b47e86714b0a674c576a586d74e"
+  "src/core/types.ts": {
+    "mtime": 1785778088.4206326,
+    "ast_hash": "b908f0ffb8d5886f3d75de898c1a7700",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/emitter.test.ts": {
-    "mtime": 1785611077604.2595,
-    "hash": "c9ae6360280c96d4638626f5444198f5"
+  "src/index.ts": {
+    "mtime": 1785782957.0518026,
+    "ast_hash": "6d5dd64f260fc28be01629422700ff28",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/helpers/mockFetch.ts": {
-    "mtime": 1785611054785.4563,
-    "hash": "277a0fe9ee87ff586b9b6e52e8c8d7b1"
+  "src/molecules/BankAccount.ts": {
+    "mtime": 1785783983.6607406,
+    "ast_hash": "3a054d66ef003e001d140d2f607551a9",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/managers.test.ts": {
-    "mtime": 1785611125816.511,
-    "hash": "fb7b6f3adb6dd1053cca8f5182358ac0"
+  "src/molecules/Base.ts": {
+    "mtime": 1785783932.0472915,
+    "ast_hash": "4a9414973ffc186653faa841b6a06102",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/order.test.ts": {
-    "mtime": 1785611098932.3052,
-    "hash": "2365554f0a26c735a2843d678518f49f"
+  "src/molecules/Customer.ts": {
+    "mtime": 1785783988.2216458,
+    "ast_hash": "b8c5198773268f6ad38c676575ca7de7",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/pix.test.ts": {
-    "mtime": 1785611025053.989,
-    "hash": "69a59dc6064e2fe3409dffe5480d129f"
+  "src/molecules/Order.ts": {
+    "mtime": 1785778088.4401567,
+    "ast_hash": "bccfd922493f42fb463acdfd683f7337",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/rest.test.ts": {
-    "mtime": 1785611070758.5532,
-    "hash": "808905fef6faf8974c5b645c6c6fa8a8"
+  "src/molecules/Pix.ts": {
+    "mtime": 1785778088.4422765,
+    "ast_hash": "f2623d0458d3eef1e0efa3b0f95ca0ae",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tests/webhooks.test.ts": {
-    "mtime": 1785611038318.5515,
-    "hash": "397a9acfcc6d28dfe758c925c8282fa4"
+  "src/molecules/Quote.ts": {
+    "mtime": 1785784011.322967,
+    "ast_hash": "975b75656cc7468327818bd35d6b3734",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/tsup.config.ts": {
-    "mtime": 1785610192861.102,
-    "hash": "7f2f49609e03a3d882bbb8e5c7126af9"
+  "src/molecules/Wallet.ts": {
+    "mtime": 1785783938.1600537,
+    "ast_hash": "1729660d1497d89b3f035aa92fc6d89f",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/vitest.config.ts": {
-    "mtime": 1785610949715.162,
-    "hash": "4c636bc0b7515800971657dadf01cbba"
+  "src/molecules/Webhook.ts": {
+    "mtime": 1785783998.9098635,
+    "ast_hash": "a2e252930330514b77a3c539a3d084ab",
+    "semantic_hash": ""
   },
-  "C:/Users/emanu/OneDrive/Desktop/Cosmos-Provider/README.md": {
-    "mtime": 1785610715849.144,
-    "hash": "b9add7ddd828fc548490e0f208275b94"
+  "src/oracles/CoinGeckoOracle.ts": {
+    "mtime": 1785778088.4588995,
+    "ast_hash": "ebf7a7153877cb023a90a159d47bedc8",
+    "semantic_hash": ""
+  },
+  "src/organisms/AssetManager.ts": {
+    "mtime": 1785778088.4653063,
+    "ast_hash": "6314c1d5d5d3826e8277ddfdc30f8298",
+    "semantic_hash": ""
+  },
+  "src/organisms/BankAccountManager.ts": {
+    "mtime": 1785784028.6014357,
+    "ast_hash": "4e829c367d7bdf839ae2de73c940433c",
+    "semantic_hash": ""
+  },
+  "src/organisms/BaseManager.ts": {
+    "mtime": 1785783944.5592499,
+    "ast_hash": "346b752283c3b52fdac07d1bcbeaa82e",
+    "semantic_hash": ""
+  },
+  "src/organisms/CustomerManager.ts": {
+    "mtime": 1785783957.2743056,
+    "ast_hash": "4f7c07210b0130bde4dfdc63e680b24c",
+    "semantic_hash": ""
+  },
+  "src/organisms/LookupManager.ts": {
+    "mtime": 1785784037.1067877,
+    "ast_hash": "e79dfd830f59c965dea9e36aa99eacd3",
+    "semantic_hash": ""
+  },
+  "src/organisms/OrderManager.ts": {
+    "mtime": 1785778088.4817376,
+    "ast_hash": "78ead0a158471d17c94a29bb6321a832",
+    "semantic_hash": ""
+  },
+  "src/organisms/QuoteManager.ts": {
+    "mtime": 1785778088.4839756,
+    "ast_hash": "c66152c1c9f751fb6062969e3371d860",
+    "semantic_hash": ""
+  },
+  "src/organisms/SandboxManager.ts": {
+    "mtime": 1785778088.4860935,
+    "ast_hash": "19426b3fb8164f63bf89fcdcedbf8e2f",
+    "semantic_hash": ""
+  },
+  "src/organisms/SwapManager.ts": {
+    "mtime": 1785778088.4931846,
+    "ast_hash": "9ba88b6d630429504fe06c7d09827c61",
+    "semantic_hash": ""
+  },
+  "src/organisms/WalletManager.ts": {
+    "mtime": 1785783966.8863666,
+    "ast_hash": "8d1348f95c45bf1e749d5cff49433496",
+    "semantic_hash": ""
+  },
+  "src/organisms/WebhookManager.ts": {
+    "mtime": 1785784058.0046606,
+    "ast_hash": "c837ee562f5d37d5670fa3585eb626b8",
+    "semantic_hash": ""
+  },
+  "src/providers/custom/CustomProvider.ts": {
+    "mtime": 1785778088.5067663,
+    "ast_hash": "d384aab93fe4dcaebaa2514c5cd0c899",
+    "semantic_hash": ""
+  },
+  "src/providers/mercadopago/MercadoPagoProvider.ts": {
+    "mtime": 1785778088.5108218,
+    "ast_hash": "3bc5d45be135303e3f24cc90f08e063b",
+    "semantic_hash": ""
+  },
+  "src/types/index.ts": {
+    "mtime": 1785778088.5171854,
+    "ast_hash": "e53eb52177837fe83719680d124bc9bd",
+    "semantic_hash": ""
+  },
+  "src/webhooks/WebhookEmitter.ts": {
+    "mtime": 1785778088.5212505,
+    "ast_hash": "d512afcd6d3e6491e007beb50b85e9f3",
+    "semantic_hash": ""
+  },
+  "src/webhooks/index.ts": {
+    "mtime": 1785778088.5254152,
+    "ast_hash": "d5c6b93d8c395329c4a679b7676242ca",
+    "semantic_hash": ""
+  },
+  "tests/confirm-order.test.ts": {
+    "mtime": 1785783082.6232717,
+    "ast_hash": "a94f517af1fcf58654327c30a2f2ef2b",
+    "semantic_hash": ""
+  },
+  "tests/core.test.ts": {
+    "mtime": 1785778088.5295515,
+    "ast_hash": "cafbf560e5f4026417de1eb3c455b9d8",
+    "semantic_hash": ""
+  },
+  "tests/crc16.test.ts": {
+    "mtime": 1785778088.533612,
+    "ast_hash": "c1b64ba500b502bad61a6b88c30e118d",
+    "semantic_hash": ""
+  },
+  "tests/custom-provider.test.ts": {
+    "mtime": 1785778088.5357893,
+    "ast_hash": "2e7d601c2497cd6962fd1c57f45edb7e",
+    "semantic_hash": ""
+  },
+  "tests/e2e.test.ts": {
+    "mtime": 1785778088.5399227,
+    "ast_hash": "2745278d197ebb893a21644ae9584298",
+    "semantic_hash": ""
+  },
+  "tests/emitter.test.ts": {
+    "mtime": 1785778088.5419557,
+    "ast_hash": "13eacbb13fad66f2586587bc3f8efdf0",
+    "semantic_hash": ""
+  },
+  "tests/helpers/mockFetch.ts": {
+    "mtime": 1785782062.6819558,
+    "ast_hash": "44f83420119f5553ec9ee969187eb5b1",
+    "semantic_hash": ""
+  },
+  "tests/koywe.test.ts": {
+    "mtime": 1785781927.0375564,
+    "ast_hash": "a0573a5ba3dfe1f480cb882e519c72ff",
+    "semantic_hash": ""
+  },
+  "tests/managers.test.ts": {
+    "mtime": 1785778088.55032,
+    "ast_hash": "2dd429aeafbfc1bea38fe4d108521829",
+    "semantic_hash": ""
+  },
+  "tests/mercadopago.test.ts": {
+    "mtime": 1785778088.5543704,
+    "ast_hash": "60bb0f0ee2e06c91e1ac4ce99604201c",
+    "semantic_hash": ""
+  },
+  "tests/order.test.ts": {
+    "mtime": 1785778088.5565517,
+    "ast_hash": "db35a6ba7023f13b6305ef9afca0c0cf",
+    "semantic_hash": ""
+  },
+  "tests/pix.test.ts": {
+    "mtime": 1785778088.5607088,
+    "ast_hash": "f9d36e0b4a102969e1bf0ab43e1eaf35",
+    "semantic_hash": ""
+  },
+  "tests/ramp.test.ts": {
+    "mtime": 1785778088.5657878,
+    "ast_hash": "7b544bbe69e60c829546205ff9d92058",
+    "semantic_hash": ""
+  },
+  "tests/rest.test.ts": {
+    "mtime": 1785778088.5689993,
+    "ast_hash": "eef27a453f59e6ad7bd483792fd697f8",
+    "semantic_hash": ""
+  },
+  "tests/sep.test.ts": {
+    "mtime": 1785781962.1977901,
+    "ast_hash": "f80c61119e844eef1bed5d2eb3b11d30",
+    "semantic_hash": ""
+  },
+  "tests/webhooks.test.ts": {
+    "mtime": 1785778088.5710268,
+    "ast_hash": "1822b817ba7c36c57c0d03d0f57c84e1",
+    "semantic_hash": ""
+  },
+  "tsconfig.json": {
+    "mtime": 1785778088.5730512,
+    "ast_hash": "103425e9386bbf734a7b369dd484a65f",
+    "semantic_hash": ""
+  },
+  "tsup.config.ts": {
+    "mtime": 1785778088.5772684,
+    "ast_hash": "27b06be5c3e4a6b289064521d03a279e",
+    "semantic_hash": ""
+  },
+  "vitest.config.ts": {
+    "mtime": 1785778088.5793855,
+    "ast_hash": "7a180eb2a4427a308077d02f6e168b8f",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1785782208.4063559,
+    "ast_hash": "d8d0387f510f43c383ea73a59a1b9e14",
+    "semantic_hash": ""
+  },
+  "readme/README.es.md": {
+    "mtime": 1785782234.1794405,
+    "ast_hash": "2641f1a1f386b767e34010b7a4c50ec5",
+    "semantic_hash": ""
+  },
+  "readme/README.pt-BR.md": {
+    "mtime": 1785782249.435843,
+    "ast_hash": "c23c5921f77f415f27106ee76c5b2bcc",
+    "semantic_hash": ""
   }
 }

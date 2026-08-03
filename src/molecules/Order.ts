@@ -49,18 +49,22 @@ export function extractDeposit(raw: Record<string, unknown>): DepositInstruction
 }
 
 export class Order extends Base<APIOrder> {
+  /** Id de esta orden en Etherfuse. */
   get id(): string {
     return this.raw.orderId;
   }
 
+  /** Estado actual, tal como lo informa la API. Usa {@link fetch} para refrescarlo. */
   get status(): OrderStatus | undefined {
     return this.raw.status;
   }
 
+  /** `true` si esta orden compra cripto con fiat. */
   get isOnramp(): boolean {
     return this.raw.orderType === "onramp";
   }
 
+  /** `true` si esta orden vende cripto por fiat. */
   get isOfframp(): boolean {
     return this.raw.orderType === "offramp";
   }

@@ -13,6 +13,7 @@ export abstract class Base<Raw extends object> {
     this.raw = raw;
   }
 
+  /** `JSON.stringify(structure)` serializa el payload crudo, no los getters calculados. */
   toJSON(): Raw {
     return this.raw;
   }

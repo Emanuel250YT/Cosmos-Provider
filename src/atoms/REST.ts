@@ -67,35 +67,47 @@ export class REST {
     }
   }
 
+  /** Reemplaza la API key en caliente (p. ej. tras rotarla), sin recrear el cliente. */
   setApiKey(apiKey: string): this {
     this.#apiKey = apiKey;
     return this;
   }
 
+  /** `true` si hay una API key configurada. */
   get hasApiKey(): boolean {
     return Boolean(this.#apiKey);
   }
 
+  /** GET con reintentos y (opcional) query string. */
   get<T>(path: string, options?: RequestOptions): Promise<T> {
     return this.request<T>("GET", path, options);
   }
 
+  /** POST con cuerpo JSON. */
   post<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
     return this.request<T>("POST", path, { ...options, body });
   }
 
+  /** PUT con cuerpo JSON. */
   put<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
     return this.request<T>("PUT", path, { ...options, body });
   }
 
+  /** PATCH con cuerpo JSON. */
   patch<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
     return this.request<T>("PATCH", path, { ...options, body });
   }
 
+  /** DELETE. La mayoría de los endpoints de Etherfuse no devuelven cuerpo. */
   delete<T>(path: string, options?: RequestOptions): Promise<T> {
     return this.request<T>("DELETE", path, options);
   }
 
+  /**
+   * Petición genérica con reintentos: reintenta con backoff exponencial +
+   * jitter ante errores de red o respuestas retryable (424/429/5xx),
+   * hasta `options.retries` (o el default del cliente) veces.
+   */
   async request<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
     const url = this.#buildUrl(path, options.query);
     const retries = options.retries ?? this.#retries;
@@ -123,6 +135,7 @@ export class REST {
     throw lastError;
   }
 
+  /** Un único intento HTTP (sin reintentos): arma headers/body, aplica timeout, y mapea la respuesta o el error. */
   async #execute<T>(
     method: string,
     url: string,
@@ -163,6 +176,7 @@ export class REST {
     return payload as T;
   }
 
+  /** Lee el body como JSON; si no parsea (o está vacío), devuelve el texto crudo o `null`. */
   static async #parseBody(response: Response): Promise<unknown> {
     const text = await response.text().catch(() => "");
     if (!text) return null;
@@ -173,6 +187,7 @@ export class REST {
     }
   }
 
+  /** Arma la URL final: `baseUrl + path` con la query string (omitiendo valores `undefined`/`null`). */
   #buildUrl(path: string, query?: Record<string, QueryValue>): string {
     const url = new URL(this.baseUrl + path);
     if (query) {

@@ -4,10 +4,12 @@ import type { APIWebhook } from "@/types/index";
 import { Base } from "@/molecules/Base";
 
 export class Webhook extends Base<APIWebhook> {
+  /** Id de este endpoint de webhook, cuando la API lo devuelve. */
   get id(): string | undefined {
     return this.raw.webhookId;
   }
 
+  /** URL a la que Etherfuse envía las notificaciones firmadas. */
   get url(): string | undefined {
     return this.raw.url;
   }
@@ -20,6 +22,7 @@ export class Webhook extends Base<APIWebhook> {
     return this.raw.secret;
   }
 
+  /** Da de baja este endpoint de webhook. Lanza si no tiene `webhookId` (p. ej. un objeto construido a mano). */
   delete(): Promise<unknown> {
     if (!this.id) throw new Error("Este webhook no tiene webhookId.");
     return this.client.webhooks.delete(this.id);

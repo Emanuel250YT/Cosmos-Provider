@@ -11,6 +11,7 @@ export class Customer extends Base<APICustomer> {
     return this.raw.customerId ?? (this.raw.id as string);
   }
 
+  /** Nombre para mostrar de la organización/cliente, cuando la API lo informa. */
   get displayName(): string | undefined {
     return this.raw.displayName;
   }

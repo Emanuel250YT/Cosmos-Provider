@@ -31,18 +31,22 @@ export class LookupManager extends BaseManager {
     return rates["usd_to_mxn"];
   }
 
+  /** Catálogo de stablebonds disponibles. */
   stablebonds(): Promise<unknown> {
     return this.rest.get(Routes.lookupStablebonds(), { auth: false });
   }
 
+  /** Costo/rendimiento de un stablebond concreto. */
   stablebondCost(query?: Record<string, string | number>): Promise<unknown> {
     return this.rest.get(Routes.lookupStablebondCost(), { auth: false, query });
   }
 
+  /** Códigos de país soportados por Etherfuse. */
   countryCodes(): Promise<unknown> {
     return this.rest.get(Routes.lookupCountryCodes(), { auth: false });
   }
 
+  /** Países restringidos (no operables) para el ramp. */
   restrictedCountries(): Promise<unknown> {
     return this.rest.get(Routes.lookupRestrictedCountries(), { auth: false });
   }

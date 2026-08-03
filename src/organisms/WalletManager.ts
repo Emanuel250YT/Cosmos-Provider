@@ -21,11 +21,13 @@ export class WalletManager extends BaseManager {
     return new Wallet(this.client, raw);
   }
 
+  /** Una wallet a nivel organización por id. */
   async fetch(walletId: string): Promise<Wallet> {
     const raw = await this.rest.get<APIWallet>(Routes.walletById(walletId));
     return new Wallet(this.client, raw);
   }
 
+  /** Lista paginada de wallets a nivel organización. */
   async list(query: PageQuery = {}): Promise<Page<Wallet>> {
     const raw = await this.rest.get<Page<APIWallet>>(Routes.wallets(), {
       query: { pageNumber: query.pageNumber, pageSize: query.pageSize },
@@ -33,6 +35,7 @@ export class WalletManager extends BaseManager {
     return { ...raw, items: (raw.items ?? []).map((w) => new Wallet(this.client, w)) };
   }
 
+  /** Wallets de un customer hijo. Sin paginación documentada — soporta tanto `Page<T>` como array plano. */
   async listForCustomer(customerId: string): Promise<Wallet[]> {
     const raw = await this.rest.get<Page<APIWallet> | APIWallet[]>(
       Routes.customerWallets(customerId),
@@ -41,6 +44,7 @@ export class WalletManager extends BaseManager {
     return items.map((w) => new Wallet(this.client, w));
   }
 
+  /** Da de baja una wallet a nivel organización. */
   delete(walletId: string): Promise<unknown> {
     return this.rest.delete(Routes.walletById(walletId));
   }

@@ -60,11 +60,13 @@ export class BankAccountManager extends BaseManager {
     return this.create(customerId, { account, label });
   }
 
+  /** Una cuenta bancaria por id. */
   async fetch(bankAccountId: string): Promise<BankAccount> {
     const raw = await this.rest.get<APIBankAccount>(Routes.bankAccountById(bankAccountId));
     return new BankAccount(this.client, raw);
   }
 
+  /** Lista paginada de cuentas bancarias de la organización. */
   async list(query: PageQuery = {}): Promise<Page<BankAccount>> {
     const raw = await this.rest.get<Page<APIBankAccount>>(Routes.bankAccounts(), {
       query: { pageNumber: query.pageNumber, pageSize: query.pageSize },
