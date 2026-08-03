@@ -1,8 +1,8 @@
 /**
  * Atom: constantes globales y tabla de rutas de la API de Etherfuse.
  *
- * `Routes` es la única fuente de verdad de los paths (estilo discord.js):
- * si Etherfuse cambia un endpoint, se corrige aquí y toda la librería lo hereda.
+ * `Routes` is the single source of truth for API paths: if Etherfuse changes
+ * an endpoint, fix it here and the whole library inherits the change.
  */
 
 export const Environments = {

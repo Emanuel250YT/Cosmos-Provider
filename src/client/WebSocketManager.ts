@@ -1,5 +1,5 @@
 /**
- * Gateway WebSocket (equivalente al WebSocketManager de discord.js).
+ * WebSocket gateway for live order events.
  *
  * Flujo: POST /ramp/ws-api-token → token de un solo uso (expira en 30 s) →
  * wss://.../ramp/ws?token=... (query param porque el navegador no puede poner

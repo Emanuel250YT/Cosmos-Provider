@@ -1,18 +1,21 @@
 {
   "name": "cosmos-providers",
   "version": "0.1.0",
-  "description": "Cliente TypeScript para la API de Etherfuse (onramp/offramp MXN·SPEI y BRL·PIX) con generación de QR PIX, estilo Discord.js: Client + Managers + Structures. Isomórfico: backend y frontend.",
+  "description": "Provider-agnostic crypto onramp/offramp toolkit for Latin America: Mercado Pago QR & payment links, PIX, SPEI, CoinGecko pricing with configurable spread, automatic USDC settlement, and signed webhooks. TypeScript, isomorphic (Node >= 18 and browsers).",
   "keywords": [
-    "etherfuse",
-    "pix",
-    "brl",
-    "spei",
     "onramp",
     "offramp",
+    "mercadopago",
+    "pix",
+    "spei",
+    "usdc",
     "stablecoin",
+    "coingecko",
     "qr",
     "payments",
-    "brcode"
+    "webhooks",
+    "latam",
+    "etherfuse"
   ],
   "license": "MIT",
   "author": "Cosmos",
@@ -36,6 +39,7 @@
   "files": [
     "dist",
     "README.md",
+    "readme",
     "LICENSE"
   ],
   "engines": {
@@ -49,6 +53,8 @@
     "test:watch": "vitest",
     "test:e2e": "vitest run tests/e2e.test.ts",
     "flow": "tsx examples/full-flow.ts",
+    "demo": "tsx examples/run-all.ts",
+    "demo:ui": "tsx examples/demo-ui.ts",
     "prepublishOnly": "npm run typecheck && npm run build && npm run test"
   },
   "dependencies": {

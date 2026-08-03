@@ -1,5 +1,5 @@
 /**
- * Atom: capa de transporte HTTP (equivalente al `REST` de discord.js).
+ * Atom: HTTP transport layer.
  *
  * - Autenticación: la API key va en `Authorization` SIN prefijo `Bearer`.
  * - Reintentos con backoff exponencial para 424/429/5xx y errores de red.

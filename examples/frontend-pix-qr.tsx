@@ -1,9 +1,9 @@
 /**
- * Ejemplo frontend (React): mostrar un QR PIX y tipos de cambio.
+ * Frontend example (React): render a PIX QR and exchange rates.
  *
- * En frontend NUNCA expongas tu API key de Etherfuse: las órdenes se crean en
- * tu backend y el frontend solo recibe el código "copia e cola". La Lookup
- * API es pública, así que LookupClient sí puede usarse directo en el browser.
+ * NEVER expose your Etherfuse API key in the frontend: orders are created in
+ * your backend and the frontend only receives the "copia e cola" code. The
+ * Lookup API is public, so LookupClient CAN be used directly in the browser.
  */
 
 import { useEffect, useState } from "react";
@@ -16,7 +16,7 @@ export function PixCheckout({ pixCode }: { pixCode: string }) {
   const [rate, setRate] = useState<string>();
 
   useEffect(() => {
-    // El backend creó la orden con Etherfuse y nos pasó el copia-e-cola:
+    // The backend created the order and handed us the copia-e-cola code:
     Pix.fromCode(pixCode, { validate: false }).toDataURL({ width: 280 }).then(setQrUrl);
     lookup.usdToBrl().then((pair) => setRate(pair?.rate));
   }, [pixCode]);
@@ -25,30 +25,30 @@ export function PixCheckout({ pixCode }: { pixCode: string }) {
 
   return (
     <div>
-      <h2>Paga con PIX</h2>
-      {qrUrl && <img src={qrUrl} alt="QR PIX" />}
+      <h2>Pay with PIX</h2>
+      {qrUrl && <img src={qrUrl} alt="PIX QR" />}
       <p>
         {parsed.merchantName} — R$ {parsed.amount}
       </p>
       {rate && <p>1 USD ≈ R$ {rate}</p>}
       <button onClick={() => navigator.clipboard.writeText(pixCode)}>
-        Copiar código PIX
+        Copy PIX code
       </button>
     </div>
   );
 }
 
-/** También puedes generar QRs de cobro propios, sin backend: */
+/** You can also generate your own static charge QRs, no backend needed: */
 export function StaticPixQr() {
   const [svg, setSvg] = useState<string>();
 
   useEffect(() => {
     Pix.create({
-      pixKey: "cobros@miempresa.com.br",
-      merchantName: "Mi Empresa",
+      pixKey: "payments@mycompany.com.br",
+      merchantName: "My Company",
       merchantCity: "Sao Paulo",
       amount: 99.9,
-      txid: "PEDIDO42",
+      txid: "ORDER42",
     })
       .toSVG({ width: 280 })
       .then(setSvg);

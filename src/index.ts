@@ -1,12 +1,55 @@
 /**
- * cosmos-providers — cliente para la API de Etherfuse con soporte de primera
- * clase para PIX/BRL (QR de pagos), estilo discord.js y atomic design.
+ * cosmos-providers — provider-agnostic crypto onramp/offramp toolkit for
+ * Latin America: regional payment rails (Mercado Pago, PIX, SPEI), a
+ * CoinGecko rate oracle with configurable spread, automatic settlement,
+ * and a webhook system.
  *
- * Entry isomórfico: funciona en backend (Node >= 18) y frontend.
- * La verificación de webhooks (Node-only) vive en `cosmos-providers/webhooks`.
+ * Isomorphic entry: works in the backend (Node >= 18) and the browser.
+ * Node-only webhook verification lives in `cosmos-providers/webhooks`.
  */
 
-// Pages / Clients
+// Core engine (provider-agnostic onramp/offramp)
+export { CosmosRamp } from "@/core/CosmosRamp";
+export type {
+  CosmosRampOptions,
+  OnrampParams,
+  OfframpParams,
+  RampEvents,
+  WebhookHandleResult,
+} from "@/core/CosmosRamp";
+export { MemoryStore } from "@/core/MemoryStore";
+export {
+  CosmosError,
+  ProviderError,
+  OracleError,
+  SettlementError,
+  WebhookSignatureError,
+} from "@/core/errors";
+export { hmacSha256Hex, timingSafeEqualStr } from "@/core/signature";
+export type * from "@/core/types";
+
+// Rate oracles
+export { CoinGeckoOracle, applySpread } from "@/oracles/CoinGeckoOracle";
+export type { CoinGeckoOracleOptions } from "@/oracles/CoinGeckoOracle";
+
+// Payment providers
+export { MercadoPagoProvider } from "@/providers/mercadopago/MercadoPagoProvider";
+export type { MercadoPagoProviderOptions } from "@/providers/mercadopago/MercadoPagoProvider";
+
+// Outgoing webhooks (signed deliveries) + receiver-side verification
+export {
+  WebhookEmitter,
+  verifyCosmosSignature,
+  COSMOS_SIGNATURE_HEADER,
+} from "@/webhooks/WebhookEmitter";
+export type {
+  WebhookEmitterOptions,
+  WebhookEndpoint,
+  WebhookDeliveryResult,
+  CosmosWebhookEvent,
+} from "@/webhooks/WebhookEmitter";
+
+// Etherfuse provider (PIX/SPEI ramp API client)
 export { EtherfuseClient } from "@/client/EtherfuseClient";
 export type { EtherfuseClientOptions, ClientEvents } from "@/client/EtherfuseClient";
 export { LookupClient } from "@/client/LookupClient";

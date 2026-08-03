@@ -3,7 +3,7 @@
 import type { EtherfuseClient } from "@/client/EtherfuseClient";
 
 export abstract class Base<Raw extends object> {
-  /** Cliente que creó esta estructura (como en discord.js). */
+  /** Client that created this structure. */
   readonly client: EtherfuseClient;
   /** Payload crudo tal cual lo devolvió la API. */
   readonly raw: Raw;

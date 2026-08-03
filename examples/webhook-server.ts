@@ -1,9 +1,9 @@
 /**
- * Ejemplo backend: recibir webhooks firmados de Etherfuse (Express).
+ * Backend example: receive signed Etherfuse webhooks (Express).
  *
- * El secreto (base64) se obtiene UNA sola vez al crear el webhook:
- *   const wh = await client.webhooks.create({ url: "https://mi.app/webhooks/etherfuse" });
- *   console.log(wh.secret); // guárdalo en tu gestor de secretos
+ * The (base64) secret is returned ONCE when the webhook is created:
+ *   const wh = await client.webhooks.create({ url: "https://my.app/webhooks/etherfuse" });
+ *   console.log(wh.secret); // store it in your secret manager
  */
 
 import express from "express";
@@ -24,8 +24,8 @@ app.post(
       );
 
       if (event.type === "order_updated") {
-        console.log("Orden actualizada:", event);
-        // Re-lee la orden con client.orders.fetch(...) para el estado autoritativo.
+        console.log("Order updated:", event);
+        // Re-read the order with client.orders.fetch(...) for the authoritative state.
       }
 
       res.sendStatus(200);
@@ -39,4 +39,4 @@ app.post(
   },
 );
 
-app.listen(3000, () => console.log("Escuchando webhooks en :3000"));
+app.listen(3000, () => console.log("Listening on :3000"));

@@ -1,236 +1,225 @@
 # cosmos-providers
 
-Cliente TypeScript para la [API de Etherfuse](https://docs.etherfuse.com/api-reference/introduction) — onramp/offramp de stablecoins con **PIX (BRL)** y SPEI (MXN) — con soporte de primera clase para **QR de pagos PIX**.
+Crypto onramp/offramp toolkit for Latin America. Collect fiat with regional payment rails (Mercado Pago QR & payment links, PIX, SPEI) and release stablecoins automatically, priced with CoinGecko plus your own spread.
 
-- 🏗️ **Estructura estilo Discord.js**: un `Client` central con managers por recurso (`client.orders`, `client.quotes`, ...) que devuelven estructuras con métodos (`order.createPixQr()`, `quote.createOrder()`).
-- ⚛️ **Atomic design**: `atoms` (REST, errores, CRC16) → `molecules` (estructuras: `Order`, `Quote`, `Pix`) → `organisms` (managers) → `client`.
-- 🌐 **Backend y frontend**: entry principal isomórfico (solo necesita `fetch`); la verificación de webhooks (Node-only) vive en el subpath `cosmos-providers/webhooks`.
-- 🇧🇷 **PIX nativo**: genera y parsea BR Codes EMV (copia-e-cola) con CRC16, y los renderiza como QR (PNG data URL, SVG o terminal).
-- 📡 **Eventos en vivo**: WebSocket con reconexión automática — `client.on("orderUpdated", ...)`.
+**Documentation in other languages:** [Español](./readme/README.es.md) · [Português](./readme/README.pt-BR.md)
+
+## Features
+
+- **Provider-agnostic** — one engine, pluggable regional providers (Mercado Pago included, PIX/SPEI via Etherfuse, or write your own).
+- **Automatic onramp** — build a QR or payment link; when the payment is approved the engine releases USDC (or any asset) to the user's wallet.
+- **Automatic offramp** — quote crypto → fiat and pay out through the provider.
+- **CoinGecko pricing with spread** — the rate and your spread are locked when the payment is built.
+- **Webhooks, both ways** — consumes provider webhooks automatically (signature check included) and emits your own signed webhooks.
+- **TypeScript, zero heavy deps** — works on Node ≥ 18. Bring your own wallet/signer; the library never touches private keys.
+
+## Install
 
 ```bash
 npm install cosmos-providers
 ```
 
-Requiere Node ≥ 18 (o cualquier navegador moderno). Para eventos WebSocket en Node < 22, pasa la clase del paquete [`ws`](https://www.npmjs.com/package/ws) en las opciones.
+## Try it locally (no credentials needed)
 
-## Inicio rápido (backend)
+The repo ships a Mercado Pago simulator so you can run every action offline:
+
+```bash
+npm run demo      # console runner: quote → link → QR → webhook → auto USDC release → offramp
+npm run demo:ui   # web playground at http://localhost:4000 with one button per action
+```
+
+## Quick start: sell USDC via Mercado Pago
 
 ```ts
-import { EtherfuseClient } from "cosmos-providers";
+import { CosmosRamp, CoinGeckoOracle, MercadoPagoProvider } from "cosmos-providers";
 
-const client = new EtherfuseClient({
-  apiKey: process.env.ETHERFUSE_API_KEY!,
-  environment: "sandbox", // o "production"
-});
-
-// 1. Quote: 500 BRL → USDC en Solana (expira en 2 min)
-const quote = await client.quotes.create({
-  customerId: (await client.customers.me()).id,
-  blockchain: "solana",
-  sourceAmount: "500",
-  quoteAssets: {
-    type: "onramp",
-    sourceAsset: "BRL",
-    targetAsset: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+const ramp = new CosmosRamp({
+  providers: [
+    new MercadoPagoProvider({
+      accessToken: process.env.MP_ACCESS_TOKEN,
+      webhookSecret: process.env.MP_WEBHOOK_SECRET,
+      notificationUrl: "https://myapp.com/webhooks/mercadopago",
+    }),
+  ],
+  oracle: new CoinGeckoOracle(),
+  // Your code that sends the crypto. Called automatically after payment.
+  settlement: async ({ wallet, amount, asset }) => {
+    const txId = await myWallet.transfer(asset, amount, wallet);
+    return { txId };
   },
 });
 
-// 2. Orden fijando la quote
-const receipt = await quote.createOrder({
-  bankAccountId: "...",       // cuenta PIX del cliente
-  publicKey: "WALLET_SOLANA", // o cryptoWalletId para wallets embebidas
+// 1. Build the payment. Rate + spread are locked right here.
+const order = await ramp.onramp({
+  provider: "mercadopago",
+  amount: 50000,          // ARS the user will pay
+  currency: "ARS",
+  asset: "USDC",
+  spread: 0.02,           // your 2% margin over the CoinGecko rate
+  wallet: "USER_WALLET_ADDRESS",
+  method: "link",         // or "qr"
 });
 
-// 3. QR PIX para que el usuario pague
-const qr = receipt.createPixQr();
-if (qr) {
-  const png = await qr.toDataURL(); // "data:image/png;base64,..." → <img src>
-  const copiaECola = qr.toString(); // para el botón "copiar código PIX"
-}
-
-// 4. Seguir la orden
-const order = await receipt.fetch();
-await order.waitForStatus("completed");
+console.log(order.charge.link);        // send the user here to pay
+console.log(order.quote.cryptoAmount); // USDC they will receive
 ```
 
-## QR PIX sin API (frontend o backend)
+```ts
+// 2. Receive the Mercado Pago webhook. That's it — the engine verifies the
+// signature, checks the paid amount, and calls your settlement.
+app.post("/webhooks/mercadopago", express.json(), async (req, res) => {
+  const result = await ramp.handleWebhook("mercadopago", {
+    body: req.body,
+    headers: req.headers,
+    url: req.url,
+  });
+  res.sendStatus(result.status);
+});
+```
 
-`Pix` funciona standalone — no necesita API key ni red:
+```ts
+// 3. Optional: listen to what happens.
+ramp.on("payment:approved", (order) => console.log("paid", order.id));
+ramp.on("settlement:released", (order, { txId }) => console.log("USDC sent", txId));
+ramp.on("order:completed", (order) => console.log("done", order.id));
+```
+
+## How the quote works
+
+When you build a payment, the engine asks CoinGecko for the mid-market rate and applies your spread **at that moment**:
+
+| | Effective rate | Example (rate 1000, spread 2%) |
+|---|---|---|
+| Onramp | `rate * (1 + spread)` | user pays 1020 ARS per USDC |
+| Offramp | `rate * (1 - spread)` | user receives 980 ARS per USDC |
+
+The full breakdown is stored on the order:
+
+```ts
+order.quote;
+// { asset: "USDC", currency: "ARS", rate: 1000, spread: 0.02,
+//   effectiveRate: 1020, fiatAmount: 50000, cryptoAmount: 49.019608, quotedAt: ... }
+```
+
+You can also quote without creating an order:
+
+```ts
+const quote = await ramp.quote({ direction: "onramp", currency: "ARS", amount: 50000, spread: 0.02 });
+```
+
+## Offramp: buy USDC back, pay out fiat
+
+```ts
+const order = await ramp.offramp({
+  provider: "mercadopago",
+  cryptoAmount: 100,               // USDC the user sends you
+  currency: "ARS",
+  spread: 0.02,
+  destination: { email: "user@example.com" }, // Mercado Pago payout destination
+});
+
+// Show the user your treasury wallet; when their USDC arrives:
+await ramp.confirmCryptoReceived(order.id, { txId: "..." });
+// → the engine pays out fiat via the provider automatically.
+// If the provider can't pay out, it emits "payout:required" so you can do it
+// your way, then call ramp.confirmPayoutSent(order.id).
+```
+
+## Payment methods per region
+
+`MercadoPagoProvider` covers AR, BR, MX, CL, CO, PE, UY (ARS, BRL, MXN, CLP, COP, PEN, UYU):
+
+| `method` | What you get |
+|---|---|
+| `"link"` | Checkout Pro payment link (`order.charge.link`) |
+| `"qr"` (BRL) | PIX QR: EMV string (`order.charge.qr`) + base64 PNG (`order.charge.qrBase64`) |
+| `"qr"` (with `qrPos`) | Mercado Pago in-store dynamic QR |
+| `"auto"` | Best method for the currency (default) |
+
+Any other rail can be plugged in by implementing the `PaymentProvider` interface (create charge, get charge, verify/parse webhook, optional payout).
+
+## Emitting your own webhooks
+
+Get notified on your backend(s) whenever an order moves:
+
+```ts
+const ramp = new CosmosRamp({
+  // ...
+  webhooks: {
+    endpoints: [{ url: "https://myapp.com/hooks/cosmos", secret: process.env.HOOK_SECRET }],
+  },
+});
+```
+
+Every delivery is signed (`x-cosmos-signature: t=...,v1=...`). Verify it on the receiving end:
+
+```ts
+import { verifyCosmosSignature } from "cosmos-providers";
+
+const ok = await verifyCosmosSignature(rawBody, req.get("x-cosmos-signature"), secret);
+```
+
+Events: `order.created`, `payment.approved`, `payment.rejected`, `payment.mismatch`, `settlement.released`, `settlement.failed`, `payout.required`, `order.completed`.
+
+## Persistence
+
+By default orders live in memory (fine for dev). In production, implement the small `OrderStore` interface (5 methods) over your database and pass it as `store`.
+
+```ts
+const ramp = new CosmosRamp({ store: new MyPostgresStore(), /* ... */ });
+```
+
+## Safety model
+
+- Webhook bodies are never trusted: the engine re-fetches the payment from the provider API before settling.
+- The paid amount must match the quoted amount (± `defaults.amountTolerance`).
+- Duplicate webhooks are idempotent — an order settles once.
+- If your settlement throws, the order stays in `"settling"`; retry with `ramp.retrySettlement(orderId)`.
+
+## Standalone PIX QR codes
+
+Generate and parse PIX BR Codes (EMV "copia e cola") without any API:
 
 ```ts
 import { Pix } from "cosmos-providers";
 
-// Generar un cobro PIX estático propio
 const qr = Pix.create({
-  pixKey: "cobros@miempresa.com.br", // CPF/CNPJ, email, teléfono o llave aleatoria
-  merchantName: "Mi Empresa",
+  pixKey: "payments@mycompany.com.br",
+  merchantName: "My Company",
   merchantCity: "Sao Paulo",
-  amount: 99.9,          // opcional: sin monto, lo escribe el pagador
-  txid: "PEDIDO42",      // opcional
+  amount: 99.9,
 });
 
-await qr.toDataURL({ width: 320 }); // PNG data URL
-await qr.toSVG();                   // SVG escalable
-await qr.toTerminal();              // QR ASCII para CLIs
-qr.toString();                      // payload "copia e cola"
-
-// Envolver un copia-e-cola existente (p. ej. el que devolvió Etherfuse)
-const wrapped = Pix.fromCode("00020126...", { validate: false });
-
-// Decodificar y validar cualquier BR Code
-const parsed = Pix.parse("00020126...");
-// → { pixKey, merchantName, amount, txid, valid, ... }
+await qr.toDataURL(); // PNG data URL for <img src>
+qr.toString();        // "copia e cola" payload
+Pix.parse("00020126..."); // decode + validate any BR Code
 ```
 
-## Lookup público (seguro para el navegador)
+## Etherfuse client (PIX/SPEI ramp API)
 
-La Lookup API no requiere API key, así que puede llamarse directo desde frontend:
+The package also ships a full client for the [Etherfuse](https://docs.etherfuse.com) ramp API (BRL·PIX and MXN·SPEI against Solana, Stellar, Base, Polygon):
 
 ```ts
-import { LookupClient } from "cosmos-providers";
+import { EtherfuseClient } from "cosmos-providers";
 
-const lookup = new LookupClient();
-const brl = await lookup.usdToBrl();
-console.log(brl?.rate); // "5.07600"
+const client = new EtherfuseClient({ apiKey: process.env.ETHERFUSE_API_KEY, environment: "sandbox" });
+
+const quote = await client.quotes.create({ /* ... */ });
+const receipt = await quote.createOrder({ bankAccountId: "...", publicKey: "WALLET" });
+const qr = receipt.createPixQr();
 ```
 
-> ⚠️ Nunca uses `EtherfuseClient` (con API key) en el navegador. El flujo correcto: tu backend crea la orden y le pasa al frontend solo el código PIX; el frontend lo renderiza con `Pix.fromCode(...)`.
+Etherfuse webhook verification (Node-only) lives in the `cosmos-providers/webhooks` subpath. See the [examples](./examples) folder for complete flows.
 
-## Cuentas bancarias PIX y CLABE
+## Errors
 
-```ts
-const me = await client.customers.me();
-
-// BRL / PIX
-await client.bankAccounts.createPixPersonal(me.id, {
-  firstName: "João",
-  lastName: "Silva",
-  cpf: "12345678909",
-  pixKey: "joao@exemplo.com.br",
-  pixKeyType: "email", // cpf | cnpj | email | phone | random
-});
-
-// MXN / SPEI
-await client.bankAccounts.createClabePersonal(me.id, {
-  firstName: "Ana",
-  paternalLastName: "García",
-  maternalLastName: "López",
-  birthDate: "19900515",
-  birthCountryIsoCode: "MX",
-  curp: "GALA900515MDFRPN08",
-  rfc: "GALA900515AB1",
-  clabe: "646180157000000004",
-});
-```
-
-## Eventos en vivo (estilo Discord.js)
-
-```ts
-client.on("ready", () => console.log("conectado"));
-client.on("orderUpdated", ({ orderId, order }) => {
-  console.log(orderId, "→", order?.status);
-});
-client.on("disconnect", () => {}); // se reconecta solo (backoff exponencial)
-
-await client.connect();
-```
-
-En Node < 22: `new EtherfuseClient({ apiKey, webSocket: (await import("ws")).WebSocket })`.
-
-## Webhooks firmados (backend)
-
-Etherfuse firma cada webhook con HMAC-SHA256 sobre el JSON canonicalizado (RFC 8785) en la cabecera `X-Signature`:
-
-```ts
-import { constructEvent } from "cosmos-providers/webhooks";
-
-app.post("/webhooks/etherfuse", express.raw({ type: "application/json" }), (req, res) => {
-  const event = constructEvent(
-    req.body.toString("utf8"),
-    req.header("X-Signature"),
-    process.env.ETHERFUSE_WEBHOOK_SECRET!, // base64, devuelto UNA vez al crear el webhook
-  );
-  if (event.type === "order_updated") { /* ... */ }
-  res.sendStatus(200);
-});
-```
-
-## Sandbox
-
-```ts
-// Simula el depósito fiat de una orden onramp (solo sandbox)
-await client.sandbox.fiatReceived(receipt.orderId);
-```
-
-## Arquitectura (atomic design)
-
-| Capa | Carpeta | Contenido |
-|---|---|---|
-| Atoms | `src/atoms` | `REST` (transporte HTTP con reintentos), errores, constantes/`Routes`, CRC16, EventEmitter tipado |
-| Molecules | `src/molecules` | Estructuras: `Order`, `OrderReceipt`, `Quote`, `BankAccount`, `Customer`, `Wallet`, `Webhook`, `Pix`/`PixQr` |
-| Organisms | `src/organisms` | Managers: `OrderManager`, `QuoteManager`, `BankAccountManager`, `LookupManager`, ... |
-| Client | `src/client` | `EtherfuseClient` (API key + eventos), `LookupClient` (público), `WebSocketManager` |
-
-### Escape hatch
-
-Cualquier endpoint aún no tipado se puede llamar con la capa REST:
-
-```ts
-await client.rest.get("/ramp/organization/...");
-await client.rest.post("/ramp/...", { body: "..." });
-```
-
-Todos los paths viven en `Routes` (`src/atoms/constants.ts`). Los marcados `@inferred` siguen la convención de la API pero no aparecen literalmente en la documentación pública — si alguno devuelve 404, corrígelo ahí y toda la librería lo hereda.
-
-## Errores
-
-- `EtherfuseAPIError` — respuesta HTTP de error (`.status`, `.body`, `.isRetryable`; 424/429/5xx se reintentan solos con backoff).
-- `EtherfuseNetworkError` — fallo de red/timeout.
-- `PixError` — BR Code inválido o parámetros de cobro incorrectos.
-- `WebhookVerificationError` — firma de webhook inválida.
-
-Los imports internos usan el alias `@/` (→ `src/`), configurado en `tsconfig.json`, resuelto por tsup en el build y por `vitest.config.ts` en los tests.
-
-## Tests
-
-```bash
-npm test           # suite unitaria (Vitest): PIX/EMV, CRC16, REST, webhooks, managers, órdenes
-npm run test:e2e   # E2E contra el sandbox real (necesita ETHERFUSE_API_KEY; sin key se salta)
-npm run flow       # flujo completo ejecutable: cuenta PIX → quote → orden → QR → depósito simulado → completed
-```
-
-Para los tests E2E y el flujo completo, crea un `.env` en la raíz:
-
-```
-ETHERFUSE_API_KEY=tu_key_de_sandbox
-# opcionales:
-# ETHERFUSE_BLOCKCHAIN=solana
-# ETHERFUSE_TARGET_ASSET=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
-# ETHERFUSE_WALLET=TU_WALLET
-```
-
-### Notas del sandbox (verificadas contra la API real)
-
-- `GET /ramp/me` devuelve el UUID como `id` (no `customerId`); `customer.id` lo resuelve.
-- `GET /ramp/assets` exige `blockchain`, `currency` **y** `wallet` como query params.
-- Solo se permite **una cuenta BRL por organización**; el flujo reutiliza la existente.
-- El sandbox rechaza CLABEs de STP (prefijo 646) al registrar cuentas MXN propias.
-- Las órdenes exigen `publicKey` (wallet **registrada** vía `client.wallets.register`) o `cryptoWalletId`. Una wallet reclamada por otra organización no puede registrarse.
-- En Stellar (testnet): la cuenta debe estar **fondeada** (friendbot) y tener **trustline** del asset antes de crear la orden.
-- Identificador de asset Stellar: formato `CODE-ISSUER` (con guion), p. ej. `CETES-GC3CW7...`.
-- El sandbox **no devuelve el copia-e-cola PIX** en la orden (deja `depositClabe` vacío y `depositBankName: "PIX"`); usa `Pix.create(...)` para generar QRs propios y `Pix.fromCode(...)` cuando producción entregue el código real.
-- `currency` de las cuentas llega en minúsculas (`"brl"`); `account.isPix` ya lo normaliza.
-
-## Grafo de conocimiento (Graphify)
-
-El proyecto incluye un grafo de conocimiento generado con [Graphify](https://graphify.com/) en `.graphify/`:
-
-- `.graphify/graph.json` — 316 nodos / 640 aristas / 25 comunidades etiquetadas, con descripción por símbolo.
-- `.graphify/GRAPH_REPORT.md` — informe de comunidades y hubs.
-- `.graphify/studio/studio.html` — **visualización interactiva autocontenida** (doble clic para abrir).
-
-Para regenerarlo tras cambios: `npx @sentropic/graphify update .`
+| Error | Meaning |
+|---|---|
+| `ProviderError` | A provider API call failed (`.provider`, `.status`, `.body`) |
+| `OracleError` | CoinGecko couldn't price the pair |
+| `SettlementError` | The crypto/fiat leg failed to move |
+| `WebhookSignatureError` | Invalid webhook signature |
+| `CosmosError` | Base class for all of the above |
 
 ## Scripts
 
@@ -240,6 +229,6 @@ npm run typecheck  # tsc --noEmit
 npm test           # vitest
 ```
 
-## Licencia
+## License
 
 MIT

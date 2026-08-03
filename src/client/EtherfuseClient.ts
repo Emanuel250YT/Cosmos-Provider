@@ -1,8 +1,7 @@
 /**
- * Page (nivel superior del atomic design): EtherfuseClient.
+ * EtherfuseClient — client for the Etherfuse ramp API (PIX/BRL and SPEI/MXN).
  *
- * El punto de entrada estilo discord.js — un cliente con managers por recurso
- * y eventos en vivo:
+ * A single client with one manager per resource and live events:
  *
  * ```ts
  * const client = new EtherfuseClient({ apiKey: "...", environment: "sandbox" });

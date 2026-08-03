@@ -1,8 +1,8 @@
 /**
- * Ejemplo backend: onramp BRL completo con QR PIX y eventos en vivo.
+ * Backend example: full BRL onramp with a PIX QR and live events (Etherfuse).
  *
- * Ejecutar con: npx tsx examples/backend-pix-onramp.ts
- * Requiere: ETHERFUSE_API_KEY (sandbox) en el entorno.
+ * Run with: npx tsx examples/backend-pix-onramp.ts
+ * Requires: ETHERFUSE_API_KEY (sandbox) in the environment.
  */
 
 import { EtherfuseClient } from "cosmos-providers";
@@ -14,15 +14,15 @@ const client = new EtherfuseClient({
 
 client.on("debug", (msg) => console.log(msg));
 client.on("orderUpdated", ({ orderId, order }) => {
-  console.log(`Orden ${orderId} → ${order?.status}`);
+  console.log(`Order ${orderId} → ${order?.status}`);
 });
 
 async function main() {
-  // 0. Tu organización (customerId por defecto para quotes)
+  // 0. Your organization (default customerId for quotes)
   const me = await client.customers.me();
-  console.log("Organización:", me.id);
+  console.log("Organization:", me.id);
 
-  // 1. Cuenta bancaria PIX del cliente final (BRL)
+  // 1. The end user's PIX bank account (BRL)
   const account = await client.bankAccounts.createPixPersonal(me.id, {
     firstName: "João",
     lastName: "Silva",
@@ -30,9 +30,9 @@ async function main() {
     pixKey: "joao@exemplo.com.br",
     pixKeyType: "email",
   });
-  console.log("Cuenta PIX:", account.id, account.currency);
+  console.log("PIX account:", account.id, account.currency);
 
-  // 2. Quote: 500 BRL → USDC en Solana (expira en 2 minutos)
+  // 2. Quote: 500 BRL → USDC on Solana (expires in 2 minutes)
   const quote = await client.quotes.create({
     customerId: me.id,
     blockchain: "solana",
@@ -45,31 +45,31 @@ async function main() {
   });
   console.log(`Quote: ${quote.raw.sourceAmount} BRL → ${quote.destinationAmount} USDC`);
 
-  // 3. Orden fijando la quote
+  // 3. Create the order, locking the quote
   const receipt = await quote.createOrder({
     bankAccountId: account.id,
-    publicKey: "TU_WALLET_SOLANA",
+    publicKey: "YOUR_SOLANA_WALLET",
   });
 
-  // 4. QR PIX para que el usuario pague
+  // 4. PIX QR for the user to pay
   const qr = receipt.createPixQr();
   if (qr) {
     console.log("Copia e cola:", qr.toString());
-    console.log(await qr.toTerminal()); // QR en la terminal
+    console.log(await qr.toTerminal()); // QR in the terminal
   } else if (receipt.deposit) {
-    console.log("Instrucciones de depósito:", receipt.deposit);
+    console.log("Deposit instructions:", receipt.deposit);
   }
 
-  // 5. Eventos en vivo por WebSocket
+  // 5. Live events over WebSocket
   await client.connect();
 
-  // 6. Sandbox: simular que el fiat llegó
+  // 6. Sandbox: simulate the fiat arriving
   await client.sandbox.fiatReceived(receipt.orderId);
 
-  // 7. Esperar a que complete
+  // 7. Wait until it completes
   const order = await receipt.fetch();
   const completed = await order.waitForStatus("completed");
-  console.log("Completada:", completed.raw.confirmedTxSignature);
+  console.log("Completed:", completed.raw.confirmedTxSignature);
 
   client.destroy();
 }
