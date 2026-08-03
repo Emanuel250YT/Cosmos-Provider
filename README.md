@@ -210,6 +210,18 @@ ETHERFUSE_API_KEY=tu_key_de_sandbox
 # ETHERFUSE_WALLET=TU_WALLET
 ```
 
+### Notas del sandbox (verificadas contra la API real)
+
+- `GET /ramp/me` devuelve el UUID como `id` (no `customerId`); `customer.id` lo resuelve.
+- `GET /ramp/assets` exige `blockchain`, `currency` **y** `wallet` como query params.
+- Solo se permite **una cuenta BRL por organización**; el flujo reutiliza la existente.
+- El sandbox rechaza CLABEs de STP (prefijo 646) al registrar cuentas MXN propias.
+- Las órdenes exigen `publicKey` (wallet **registrada** vía `client.wallets.register`) o `cryptoWalletId`. Una wallet reclamada por otra organización no puede registrarse.
+- En Stellar (testnet): la cuenta debe estar **fondeada** (friendbot) y tener **trustline** del asset antes de crear la orden.
+- Identificador de asset Stellar: formato `CODE-ISSUER` (con guion), p. ej. `CETES-GC3CW7...`.
+- El sandbox **no devuelve el copia-e-cola PIX** en la orden (deja `depositClabe` vacío y `depositBankName: "PIX"`); usa `Pix.create(...)` para generar QRs propios y `Pix.fromCode(...)` cuando producción entregue el código real.
+- `currency` de las cuentas llega en minúsculas (`"brl"`); `account.isPix` ya lo normaliza.
+
 ## Grafo de conocimiento (Graphify)
 
 El proyecto incluye un grafo de conocimiento generado con [Graphify](https://graphify.com/) en `.graphify/`:

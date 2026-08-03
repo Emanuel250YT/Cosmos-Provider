@@ -4,3 +4,4 @@ dist/
 .env
 .env.*
 .graphify/cache/
+.stellar-sandbox-keys.json

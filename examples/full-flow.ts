@@ -14,7 +14,7 @@
  */
 
 import "dotenv/config";
-import { EtherfuseClient, EtherfuseAPIError, type Quote } from "../src/index";
+import { EtherfuseClient, EtherfuseAPIError, Pix, type Quote } from "../src/index";
 
 const API_KEY = process.env.ETHERFUSE_API_KEY;
 if (!API_KEY) {
@@ -35,35 +35,65 @@ async function main() {
   const me = await client.customers.me();
   console.log(`✔ Organización: ${me.id} (${me.displayName ?? "sin nombre"})`);
 
-  // ── 2. Cuenta bancaria (intenta PIX/BRL, cae a CLABE/MXN) ──────────────
+  // ── 2. Cuenta bancaria: reutiliza una compliant o crea una PIX ─────────
+  // El sandbox solo permite UNA cuenta BRL por organización.
   let currency: "BRL" | "MXN" = "BRL";
   let bankAccountId: string;
-  try {
-    const pix = await client.bankAccounts.createPixPersonal(me.id, {
-      firstName: "João",
-      lastName: "Silva",
-      cpf: "12345678909",
-      pixKey: "joao.sandbox@exemplo.com.br",
-      pixKeyType: "email",
-    });
-    bankAccountId = pix.id;
-    console.log(`✔ Cuenta PIX creada: ${pix.id} (compliant: ${pix.compliant})`);
-  } catch (error) {
-    if (!(error instanceof EtherfuseAPIError)) throw error;
-    console.warn(`⚠ PIX no disponible (HTTP ${error.status}) — probando CLABE/MXN...`);
-    currency = "MXN";
-    const clabe = await client.bankAccounts.createClabePersonal(me.id, {
-      firstName: "Ana",
-      paternalLastName: "García",
-      maternalLastName: "López",
-      birthDate: "19900515",
-      birthCountryIsoCode: "MX",
-      curp: "GALA900515MDFRPN08",
-      rfc: "XEXX010101000", // RFC mágico del sandbox: auto-aprueba
-      clabe: "646180157000000004",
-    });
-    bankAccountId = clabe.id;
-    console.log(`✔ Cuenta CLABE creada: ${clabe.id}`);
+
+  const accounts = await client.bankAccounts.listForCustomer(me.id);
+  const usable = (cur: string) =>
+    accounts.find(
+      (a) => a.currency?.toUpperCase() === cur && a.compliant && !a.raw.deletedAt,
+    );
+
+  const existing = usable("BRL") ?? usable("MXN");
+  if (existing) {
+    currency = existing.isPix ? "BRL" : "MXN";
+    bankAccountId = existing.id;
+    console.log(`✔ Reutilizando cuenta ${currency} existente: ${existing.id}`);
+  } else {
+    try {
+      const pix = await client.bankAccounts.createPixPersonal(me.id, {
+        firstName: "João",
+        lastName: "Silva",
+        cpf: "12345678909",
+        pixKey: "joao.sandbox@exemplo.com.br",
+        pixKeyType: "email",
+      });
+      bankAccountId = pix.id;
+      console.log(`✔ Cuenta PIX creada: ${pix.id} (compliant: ${pix.compliant})`);
+    } catch (error) {
+      if (!(error instanceof EtherfuseAPIError)) throw error;
+      console.warn(`⚠ PIX no disponible (${error.message}) — probando CLABE/MXN...`);
+      currency = "MXN";
+      const clabe = await client.bankAccounts.createClabePersonal(me.id, {
+        firstName: "Ana",
+        paternalLastName: "García",
+        maternalLastName: "López",
+        birthDate: "19900515",
+        birthCountryIsoCode: "MX",
+        curp: "GALA900515MDFRPN08",
+        rfc: "XEXX010101000", // RFC mágico del sandbox: auto-aprueba
+        clabe: "012180015700000000", // CLABE de ejemplo no-STP (el sandbox rechaza 646)
+      });
+      bankAccountId = clabe.id;
+      console.log(`✔ Cuenta CLABE creada: ${clabe.id}`);
+    }
+  }
+
+  // ── 2b. Wallet: la orden exige publicKey registrada (o cryptoWalletId) ─
+  if (WALLET) {
+    const wallets = await client.wallets.listForCustomer(me.id).catch(() => []);
+    const registered = wallets.find((w) => w.publicKey === WALLET);
+    if (registered) {
+      console.log(`✔ Wallet ya registrada: ${registered.id}`);
+    } else {
+      const wallet = await client.wallets.register({
+        publicKey: WALLET,
+        blockchain: BLOCKCHAIN,
+      });
+      console.log(`✔ Wallet registrada: ${wallet.id} (kyc: ${wallet.raw.kycStatus})`);
+    }
   }
 
   // ── 3. Quote (expira en 2 minutos) ─────────────────────────────────────
@@ -106,8 +136,22 @@ async function main() {
     const qr = receipt.createPixQr()!;
     console.log("✔ Código PIX (copia e cola):", qr.toString());
     console.log(await qr.toTerminal());
-  } else if (receipt.deposit) {
+  } else if (receipt.deposit?.method === "spei") {
     console.log("✔ Depósito SPEI:", receipt.deposit);
+  } else if (currency === "BRL") {
+    // El sandbox no devuelve el BR Code (en producción el pagador lo obtiene
+    // vía estas instrucciones / statusPage). Demostramos el QR generándolo
+    // localmente con el mismo monto usando el motor PIX de la librería:
+    console.log("ℹ El sandbox no expone el copia-e-cola; genero un QR PIX local de demo:");
+    const demo = Pix.create({
+      pixKey: "sandbox@etherfuse.com.br",
+      merchantName: "Etherfuse Sandbox",
+      merchantCity: "Sao Paulo",
+      amount: "500",
+      txid: receipt.orderId.replace(/-/g, "").slice(0, 25),
+    });
+    console.log("  copia e cola:", demo.toString());
+    console.log(await demo.toTerminal());
   } else {
     console.log("ℹ La respuesta no trajo instrucciones de depósito:", receipt.raw);
   }
@@ -119,8 +163,8 @@ async function main() {
   // ── 7. Esperar a que la orden complete ─────────────────────────────────
   const order = await receipt.fetch();
   const completed = await order.waitForStatus("completed", {
-    intervalMs: 3_000,
-    timeoutMs: 180_000,
+    intervalMs: 5_000,
+    timeoutMs: 420_000, // la liquidación on-chain del sandbox puede tardar varios minutos
   });
   console.log(`✔ Orden completada. Tx: ${completed.raw.confirmedTxSignature ?? "n/a"}`);
   console.log(`  Página de estado: ${completed.statusPage ?? "n/a"}`);

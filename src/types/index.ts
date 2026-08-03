@@ -170,7 +170,9 @@ export interface APICreateOrderResult {
 // ---------------------------------------------------------------------------
 
 export interface APICustomer {
-  customerId: string;
+  customerId?: string;
+  /** `GET /ramp/me` devuelve el UUID como `id` en lugar de `customerId`. */
+  id?: string;
   displayName?: string;
   createdAt?: string;
   updatedAt?: string;

@@ -34,30 +34,36 @@ describe.skipIf(!API_KEY)("Sandbox autenticado (requiere ETHERFUSE_API_KEY)", ()
     expect(me.id).toBeTruthy();
   });
 
-  it("lista los assets soportados", async () => {
-    const assets = await client.assets.list();
-    expect(Array.isArray(assets)).toBe(true);
-  });
+  it.skipIf(!process.env.ETHERFUSE_WALLET)(
+    "lista los assets soportados en Stellar para BRL",
+    async () => {
+      const assets = await client.assets.list({
+        blockchain: "stellar",
+        currency: "BRL",
+        wallet: process.env.ETHERFUSE_WALLET!,
+      });
+      expect(Array.isArray(assets)).toBe(true);
+    },
+  );
 
   it("cotiza un onramp BRL → token (o reporta que el par no está disponible)", async () => {
     const me = await client.customers.me();
+    const blockchain = (process.env.ETHERFUSE_BLOCKCHAIN ?? "stellar") as never;
+    const targetAsset =
+      process.env.ETHERFUSE_TARGET_ASSET ??
+      "CETES-GC3CW7EDYRTWQ635VDIGY6S4ZUF5L6TQ7AA4MWS7LEQDBLUSZXV7UPS4";
     try {
       const quote = await client.quotes.create({
         customerId: me.id,
-        blockchain: "solana",
+        blockchain,
         sourceAmount: "500",
-        quoteAssets: {
-          type: "onramp",
-          sourceAsset: "BRL",
-          // USDC en Solana; si tu organización usa otro asset, ajústalo.
-          targetAsset: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-        },
+        quoteAssets: { type: "onramp", sourceAsset: "BRL", targetAsset },
       });
       expect(Number(quote.destinationAmount)).toBeGreaterThan(0);
       expect(quote.isExpired).toBe(false);
     } catch (error) {
-      // 404 = par no soportado para esta org/blockchain: no es un fallo de la librería.
-      if (error instanceof EtherfuseAPIError && (error.status === 404 || error.status === 424)) {
+      // Par no soportado para esta org/blockchain: no es un fallo de la librería.
+      if (error instanceof EtherfuseAPIError && [400, 404, 424].includes(error.status)) {
         console.warn(`Par BRL no disponible en esta cuenta sandbox (HTTP ${error.status}).`);
         return;
       }

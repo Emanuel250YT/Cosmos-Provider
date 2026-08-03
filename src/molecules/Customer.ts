@@ -7,7 +7,8 @@ import { Base } from "@/molecules/Base";
 
 export class Customer extends Base<APICustomer> {
   get id(): string {
-    return this.raw.customerId;
+    // /ramp/me devuelve `id`; el resto de endpoints usan `customerId`.
+    return this.raw.customerId ?? (this.raw.id as string);
   }
 
   get displayName(): string | undefined {

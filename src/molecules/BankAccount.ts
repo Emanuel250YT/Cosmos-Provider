@@ -16,14 +16,14 @@ export class BankAccount extends Base<APIBankAccount> {
     return this.raw.currency;
   }
 
-  /** `true` si es una cuenta brasileña liquidada por PIX. */
+  /** `true` si es una cuenta brasileña liquidada por PIX. La API devuelve la moneda en minúsculas. */
   get isPix(): boolean {
-    return this.currency === "BRL";
+    return this.currency?.toUpperCase() === "BRL";
   }
 
   /** `true` si es una cuenta mexicana liquidada por SPEI. */
   get isSpei(): boolean {
-    return this.currency === "MXN";
+    return this.currency?.toUpperCase() === "MXN";
   }
 
   /** `true` si la cuenta puede usarse para transaccionar. */
