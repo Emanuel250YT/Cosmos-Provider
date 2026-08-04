@@ -46,8 +46,8 @@ import "dotenv/config";
 import { randomBytes, generateKeyPairSync } from "node:crypto";
 import { keccak256 } from "js-sha3";
 import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset as StellarAsset, BASE_FEE } from "@stellar/stellar-sdk";
-import { CosmosClient, EtherfuseAPIError, Pix, Chain, FiatCurrency, Asset, type EtherfuseClient, type Quote, type OrderReceipt } from "../src/index";
-import { isMainModule } from "./helpers/isMain";
+import { CosmosClient, EtherfuseAPIError, Pix, Chain, FiatCurrency, Asset, type EtherfuseClient, type Quote, type OrderReceipt } from "../../src/index";
+import { isMainModule } from "../helpers/isMain";
 
 /** Currency this flow supports (Etherfuse only settles BRL/MXN today). */
 type EtherfuseFiat = typeof FiatCurrency.BRL | typeof FiatCurrency.MXN;

@@ -5,11 +5,12 @@
  * verified pipeline instead of re-implementing signature/amount/idempotency
  * checks by hand.
  *
- * Run with: npx tsx examples/confirm-order-on-return.ts
+ * Run with: npx tsx examples/mercadopago/confirm-order-on-return.ts
  */
 
-import { CosmosRamp, MercadoPagoProvider } from "../src/index";
-import { createMockMercadoPago } from "./helpers/mock-mercadopago";
+import { CosmosRamp, MercadoPagoProvider } from "../../src/index";
+import { createMockMercadoPago } from "../helpers/mock-mercadopago";
+import { isMainModule } from "../helpers/isMain";
 
 // Exported so tests can drive the exact same instances this script runs —
 // swap `mp.fetchImpl` for nothing (real network) and a real TEST-... token
@@ -58,7 +59,7 @@ export async function confirmOrderOnReturn(orderId: string, paymentId: string) {
 async function main() {
   const order = await ramp.onramp({
     provider: "mercadopago",
-    amount: 50_000,
+    amount: 5_000,
     currency: "ARS",
     wallet: "USER_WALLET",
     method: "link",
@@ -74,6 +75,6 @@ async function main() {
   console.log("confirming again:    ", await confirmOrderOnReturn(order.id, paymentId));
 }
 
-if (process.argv[1] && process.argv[1].endsWith("confirm-order-on-return.ts")) {
+if (isMainModule(import.meta.url)) {
   main().catch(console.error);
 }

@@ -5,8 +5,8 @@ export class SepError extends Error {
   /** HTTP status code, when the error came from an API response. */
   readonly statusCode?: number;
 
-  constructor(sep: string, message: string, statusCode?: number) {
-    super(`[${sep}] ${message}`);
+  constructor(sep: string, message: string, statusCode?: number, options?: { cause?: unknown }) {
+    super(`[${sep}] ${message}`, options?.cause !== undefined ? { cause: options.cause } : undefined);
     this.name = "SepError";
     this.sep = sep;
     this.statusCode = statusCode;

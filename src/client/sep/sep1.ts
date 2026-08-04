@@ -33,7 +33,7 @@ export async function fetchStellarToml(
   try {
     response = await fetchImpl(url);
   } catch (cause) {
-    throw new SepError("SEP-1", `Network error fetching ${url}`);
+    throw new SepError("SEP-1", `Network error fetching ${url}`, undefined, { cause });
   }
 
   if (!response.ok) {

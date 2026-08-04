@@ -10,7 +10,7 @@
  * Run `npm run flow:koywe`. Without credentials, the script warns and exits
  * — there's nothing else to show without them.
  *
- * DESIGN (same as examples/full-flow.ts):
+ * DESIGN (same as examples/etherfuse/full-flow.ts):
  * - Each section (on-ramp, off-ramp, KYC) runs in its own try/catch: if one
  *   fails (e.g. the sandbox doesn't have the test bank account number we
  *   tried), the error is logged and the next section still runs — the
@@ -24,8 +24,8 @@
 
 import "dotenv/config";
 import { Keypair, Horizon } from "@stellar/stellar-sdk";
-import { CosmosClient, KoyweError, type KoyweClient } from "../src/index";
-import { isMainModule } from "./helpers/isMain";
+import { CosmosClient, KoyweError, type KoyweClient } from "../../src/index";
+import { isMainModule } from "../helpers/isMain";
 
 const DEMO_EMAIL = "sandbox-demo@example.com";
 const stellarServer = new Horizon.Server("https://horizon-testnet.stellar.org");

@@ -1,6 +1,6 @@
 # cosmos-providers
 
-Crypto onramp/offramp toolkit for Latin America. Collect fiat with regional payment rails (Mercado Pago payment links & PIX, SPEI) and release stablecoins automatically, priced with CoinGecko plus your own spread. Also ships full on/off-ramp anchors to USDC on Stellar — Etherfuse, Koywe, and composable SEP-1/10/24 helpers for any SEP-compliant anchor.
+Crypto onramp/offramp toolkit for Latin America. **One client, `CosmosClient`**, wires together regional fiat rails (Mercado Pago payment links & PIX, SPEI) with automatic stablecoin release, full on/off-ramp anchors to USDC on Stellar (Etherfuse, Koywe), and composable SEP-1/10/24 helpers for any SEP-compliant anchor — priced with CoinGecko plus your own spread.
 
 **Documentation in other languages:** [Español](./readme/README.es.md) · [Português](./readme/README.pt-BR.md)
 
@@ -12,22 +12,21 @@ npm install cosmos-providers
 
 Node ≥ 18, ESM and CJS both work, TypeScript types included. No SDK dependency for any provider — everything talks to the raw REST API with `fetch`.
 
-## Quickstart: Mercado Pago payment link
+## Quickstart
 
-The fastest way to see the library do something real. Payment link (Checkout Pro) is the rail to start with — it works in every Mercado Pago market and is the one you can actually exercise with test/sandbox credentials (PIX below cannot be tested in sandbox at all).
-
-1. Get an access token from your [Mercado Pago developer panel](https://www.mercadopago.com.ar/developers/panel/app) — `APP_USR-...` works fine here, `sandbox: true` below is what puts the *call* in test mode, not the token's prefix.
-2. Save this as `quickstart.ts`:
+Everything in this library — Mercado Pago, Etherfuse, Koywe, SEP, the automatic-settlement engine — is reachable from **one `CosmosClient`**. You configure the pieces you use in a single object; the client exposes each as a property (`cosmos.mercadopago`, `cosmos.etherfuse`, `cosmos.koywe`, `cosmos.sep`, `cosmos.ramp`) instead of you importing and wiring `MercadoPagoProvider`, `EtherfuseClient`, `KoyweClient`, `CosmosRamp`, and `CoinGeckoOracle` by hand.
 
 ```ts
-import { MercadoPagoProvider } from "cosmos-providers";
+import { CosmosClient } from "cosmos-providers";
 
-const mercadopago = new MercadoPagoProvider({
-  accessToken: process.env.MP_ACCESS_TOKEN!,
-  sandbox: true, // see "Sandbox vs. production" below for why this is explicit
+const cosmos = new CosmosClient({
+  mercadopago: {
+    accessToken: process.env.MP_ACCESS_TOKEN!, // you read process.env — the library never does
+    sandbox: true, // see "Sandbox vs. production" below for why this is explicit
+  },
 });
 
-const charge = await mercadopago.createPaymentLink({
+const charge = await cosmos.mercadopago!.createPaymentLink({
   amount: 5000,
   currency: "ARS",
   reference: `order-${Date.now()}`,
@@ -37,19 +36,36 @@ const charge = await mercadopago.createPaymentLink({
 console.log("Pay here:", charge.link);
 ```
 
-3. Run it:
+Run it:
 
 ```bash
 MP_ACCESS_TOKEN="your-token" npx tsx quickstart.ts
 ```
 
-That's it — `charge.link` is a real Checkout Pro URL. The rest of this README builds up from here: PIX, automatic USDC settlement, other providers, custom providers, and the full `CosmosRamp` engine.
+That's `charge.link`, a real Checkout Pro URL, from one `CosmosClient`. Add Etherfuse, Koywe, and automatic settlement to the **same client** by adding to the **same config object** — nothing above changes, you're just filling in more of it:
 
-Every example below is copy-paste-runnable the same way: save it, set the env vars it names, `npx tsx <file>.ts`. The [`examples/`](./examples) folder has the complete, runnable version of each one, plus `npm run flow:all` to run everything in sequence.
+```ts
+const cosmos = new CosmosClient({
+  mercadopago: { accessToken: process.env.MP_ACCESS_TOKEN!, sandbox: true },
+  etherfuse: { apiKey: process.env.ETHERFUSE_API_KEY!, environment: "sandbox" },
+  koywe: { clientId: process.env.KOYWE_CLIENT_ID!, secret: process.env.KOYWE_SECRET!, environment: "sandbox" },
+  // Wiring `settlement` turns on `cosmos.ramp`: automatic USDC release once a
+  // Mercado Pago payment is confirmed (see "Automatic settlement" below).
+  settlement: async ({ wallet, amount, asset }) => ({ txId: await myWallet.transfer(asset, amount, wallet) }),
+});
+
+cosmos.mercadopago;  // MercadoPagoProvider — createPaymentLink / createPixCharge
+cosmos.etherfuse;    // EtherfuseClient — full PIX/SPEI ramp to Stellar/Solana/Base/Polygon/Monad
+cosmos.koywe;        // KoyweClient — ARS/CLP/MXN/COP/PEN/BRL ramp to USDC on Stellar
+cosmos.sep;          // SEP-1/10/24 helpers, always available even with an empty config
+cosmos.ramp;         // CosmosRamp — only built once a fiat provider + settlement exist
+```
+
+Every section below configures one more corner of this same object. Every example is copy-paste-runnable the same way: save it, set the env vars it names, `npx tsx <file>.ts`. The [`examples/`](./examples) folder has the complete, runnable version of each one, plus `npm run flow:all` to run everything in sequence.
 
 ## Features
 
-- **Provider-agnostic** — one engine, pluggable regional providers (Mercado Pago included, PIX/SPEI via Etherfuse, or write your own).
+- **One client, every rail** — `CosmosClient` wires Mercado Pago, Etherfuse, Koywe, and SEP helpers from a single config object; use as many or as few as you need.
 - **Automatic onramp** — build a QR or payment link; when the payment is approved the engine releases USDC (or any asset) to the user's wallet.
 - **Automatic offramp** — quote crypto → fiat and pay out through the provider.
 - **CoinGecko pricing with spread** — the rate and your spread are locked when the payment is built.
@@ -58,7 +74,17 @@ Every example below is copy-paste-runnable the same way: save it, set the env va
 
 ## Configuration
 
-The library itself never reads `process.env` — every option is passed in explicitly, in your own code (this matters for things like Mercado Pago's sandbox flag, see below — it's a config value you set, never something inferred from an env var or a token's format). `.env.example` documents the variables the scripts in [`examples/`](./examples) read:
+**The library never reads `process.env` on its own.** Every credential is a plain constructor parameter — `accessToken: process.env.MP_ACCESS_TOKEN!` above is *you* reading the environment and handing the value to `CosmosClient` in code; nothing happens automatically just because a `.env` file exists or a variable is set. The same goes for `sandbox`, `environment`, base URLs, everything: you decide these explicitly, in your own code, every time you construct the client.
+
+```ts
+// Right: you read process.env and pass it in explicitly.
+new CosmosClient({ mercadopago: { accessToken: process.env.MP_ACCESS_TOKEN! } });
+
+// There is no equivalent of this — it doesn't exist and never will:
+// new CosmosClient(); // "just reads .env automatically" — not how this library works
+```
+
+`.env.example` documents the variables the *scripts in [`examples/`](./examples)* read this way (they're plain Node scripts that happen to call `process.env.X` themselves, same as your app would) — it has nothing to do with how the library itself is configured:
 
 ```bash
 cp .env.example .env
@@ -73,9 +99,9 @@ npm run demo      # console runner: quote → link → QR → webhook → auto U
 npm run demo:ui   # web playground at http://localhost:4000 with one button per action
 ```
 
-## Mercado Pago: payment link vs. PIX
+## Mercado Pago
 
-Mercado Pago's payment link (Checkout Pro) and PIX are genuinely different ways to collect money — different endpoints, different requirements, and PIX only exists in Brazil — so they're two separate methods, not one method with a flag.
+`cosmos.mercadopago` is a `MercadoPagoProvider` — one merchant account (or several, one per country) with two genuinely different ways to collect money:
 
 | | `createPaymentLink` | `createPixCharge` |
 |---|---|---|
@@ -84,36 +110,35 @@ Mercado Pago's payment link (Checkout Pro) and PIX are genuinely different ways 
 | **Works in sandbox?** | **Yes** | **No — production only** |
 
 ```ts
-// examples/mercadopago-payment-link.ts — run: npx tsx examples/mercadopago-payment-link.ts
-const charge = await mercadopago.createPaymentLink({
+const cosmos = new CosmosClient({ mercadopago: { accessToken: process.env.MP_ACCESS_TOKEN!, sandbox: true } });
+
+// examples/mercadopago/payment-link.ts — run: npx tsx examples/mercadopago/payment-link.ts
+const linkCharge = await cosmos.mercadopago!.createPaymentLink({
   amount: 5000,
   currency: "ARS", // or "BRL", "MXN", ...
   reference: "order-1",
   description: "Buy USDC",
 });
-charge.link; // hosted checkout URL
-```
+linkCharge.link; // hosted checkout URL
 
-```ts
-// examples/mercadopago-pix.ts — run: npx tsx examples/mercadopago-pix.ts
-const charge = await mercadopago.createPixCharge({
-  amount: 50, // BRL, always
-  reference: "order-2",
-});
-charge.qr;       // EMV "copia e cola" string, scannable as-is
-charge.qrBase64; // ready-to-embed PNG, if you'd rather show an image
+// examples/mercadopago/pix.ts — run: npx tsx examples/mercadopago/pix.ts (needs a real production BRL account)
+const pixCharge = await cosmos.mercadopago!.createPixCharge({ amount: 50, reference: "order-2" });
+pixCharge.qr;       // EMV "copia e cola" string, scannable as-is
+pixCharge.qrBase64; // ready-to-embed PNG, if you'd rather show an image
 ```
 
 **PIX has no sandbox.** Mercado Pago only grants the Payments API scope PIX needs to real, production merchant accounts — a test/sandbox account gets a 401 ("Unauthorized use of live credentials") no matter what you send. `createPixCharge` checks this and throws a clear error immediately if you point it at an account resolved as sandbox, instead of letting that confusing 401 surface. Use `createPaymentLink` to exercise the BRL rail safely in sandbox; PIX itself can only be tested against your real account.
 
 ### Sandbox vs. production
 
-`sandbox: true/false` on `MercadoPagoProvider` is a plain, explicit config value — never inferred from the token. Mercado Pago issues the *same* `APP_USR-...` prefix for real merchant accounts and for every "usuario de prueba" (test user / sandbox account) you create under them, so the prefix alone can't tell the two apart. Decide it in your own code:
+`sandbox: true/false` is a plain, explicit config value — never inferred from the token. Mercado Pago issues the *same* `APP_USR-...` prefix for real merchant accounts and for every "usuario de prueba" (test user / sandbox account) you create under them, so the prefix alone can't tell the two apart. Decide it in your own code:
 
 ```ts
-new MercadoPagoProvider({
-  accessToken: process.env.MP_ACCESS_TOKEN!,
-  sandbox: true, // you know which kind of account this token belongs to — the library doesn't
+new CosmosClient({
+  mercadopago: {
+    accessToken: process.env.MP_ACCESS_TOKEN!,
+    sandbox: true, // you know which kind of account this token belongs to — the library doesn't
+  },
 });
 ```
 
@@ -121,35 +146,30 @@ new MercadoPagoProvider({
 
 ### Multi-account: one merchant per country
 
-Mercado Pago issues a **separate merchant account** (and access token) per country — an Argentina token can't process a Brazil/PIX charge, and there's no such thing as a "default" account across countries. Pass every account into one provider instance keyed by currency, and every call routes to the right one automatically:
+Mercado Pago issues a **separate merchant account** (and access token) per country — an Argentina token can't process a Brazil/PIX charge, and there's no such thing as a "default" account across countries. Pass every account into the same client, keyed by currency, and every call routes to the right one automatically:
 
 ```ts
-const mercadopago = new MercadoPagoProvider({
-  accounts: {
-    ARS: { accessToken: process.env.MP_AR_ACCESS_TOKEN!, sandbox: true },
-    BRL: { accessToken: process.env.MP_BR_ACCESS_TOKEN!, sandbox: true },
+const cosmos = new CosmosClient({
+  mercadopago: {
+    accounts: {
+      ARS: { accessToken: process.env.MP_AR_ACCESS_TOKEN!, sandbox: true },
+      BRL: { accessToken: process.env.MP_BR_ACCESS_TOKEN!, sandbox: true },
+    },
   },
 });
 
-await mercadopago.createPaymentLink({ amount: 5000, currency: "ARS", reference: "ar-1" }); // uses the AR account
-await mercadopago.createPaymentLink({ amount: 50, currency: "BRL", reference: "br-1" });   // uses the BR account
+await cosmos.mercadopago!.createPaymentLink({ amount: 5000, currency: "ARS", reference: "ar-1" }); // uses the AR account
+await cosmos.mercadopago!.createPaymentLink({ amount: 50, currency: "BRL", reference: "br-1" });   // uses the BR account
 ```
 
 ### Webhook verification
 
 ```ts
-import { MercadoPagoProvider } from "cosmos-providers";
-
-const mercadopago = new MercadoPagoProvider({
-  accessToken: process.env.MP_ACCESS_TOKEN!,
-  webhookSecret: process.env.MP_WEBHOOK_SECRET, // from the app's dashboard, "Webhooks" section
-});
-
 app.post("/webhooks/mercadopago", express.json(), async (req, res) => {
-  const ok = await mercadopago.verifyWebhook({ body: req.body, headers: req.headers, url: req.url });
+  const ok = await cosmos.mercadopago!.verifyWebhook({ body: req.body, headers: req.headers, url: req.url });
   if (!ok) return res.sendStatus(401);
-  const notification = await mercadopago.parseWebhook({ body: req.body, headers: req.headers });
-  // notification.chargeId -> re-fetch it with mercadopago.getCharge(id) and trust *that*, never the webhook body
+  const notification = await cosmos.mercadopago!.parseWebhook({ body: req.body, headers: req.headers });
+  // notification.chargeId -> re-fetch it with cosmos.mercadopago!.getCharge(id) and trust *that*, never the webhook body
   res.sendStatus(200);
 });
 ```
@@ -157,23 +177,21 @@ app.post("/webhooks/mercadopago", express.json(), async (req, res) => {
 To test webhooks without exposing a public URL, build a signed notification for a sandbox payment yourself:
 
 ```ts
-const request = await mercadopago.buildTestWebhook(paymentId); // signed exactly like Mercado Pago would
-await mercadopago.verifyWebhook(request); // true
+const request = await cosmos.mercadopago!.buildTestWebhook(paymentId); // signed exactly like Mercado Pago would
+await cosmos.mercadopago!.verifyWebhook(request); // true
 ```
 
-## Automatic settlement with CosmosRamp
+## Automatic settlement
 
-Everything above talks to Mercado Pago directly — you decide what happens after a charge is created. `CosmosRamp` is the layer above that: it builds the charge, watches for the webhook, verifies the paid amount, and releases crypto for you.
+Mercado Pago on its own just collects fiat — you decide what happens next. Add `settlement` to your `CosmosClient` config and `cosmos.ramp` becomes the layer above that: it builds the charge, watches for the webhook, verifies the paid amount, and releases crypto for you.
+
+**See it prove itself, no credentials needed:** a real payment link only turns "approved" once a human pays it, so `npm run demo` (source: [`examples/mercadopago/settlement-demo.ts`](./examples/mercadopago/settlement-demo.ts)) runs the whole thing against a local Mercado Pago simulator instead — it fakes a payment being approved and builds a **signed webhook request using the same HMAC scheme real Mercado Pago uses**, then feeds it into `cosmos.ramp.handleWebhook(...)`. Everything past the HTTP layer is the real pipeline: signature check, re-fetching the payment, amount matching, calling your `settlement`, and releasing crypto. It also covers duplicate-webhook idempotency, amount-mismatch rejection, and the offramp payout side.
 
 ```ts
-import { CosmosRamp, CoinGeckoOracle, MercadoPagoProvider } from "cosmos-providers";
-
-const ramp = new CosmosRamp({
-  providers: [
-    new MercadoPagoProvider({ accessToken: process.env.MP_ACCESS_TOKEN!, sandbox: true }),
-  ],
-  oracle: new CoinGeckoOracle(),
-  // Your code that sends the crypto. Called automatically after payment.
+const cosmos = new CosmosClient({
+  mercadopago: { accessToken: process.env.MP_ACCESS_TOKEN!, sandbox: true },
+  // oracle defaults to CoinGeckoOracle() (no key needed for light usage) — pass
+  // `oracle: { apiKey: process.env.COINGECKO_API_KEY }` for higher rate limits.
   settlement: async ({ wallet, amount, asset }) => {
     const txId = await myWallet.transfer(asset, amount, wallet);
     return { txId };
@@ -181,7 +199,7 @@ const ramp = new CosmosRamp({
 });
 
 // 1. Build the payment. Rate + spread are locked right here.
-const order = await ramp.onramp({
+const order = await cosmos.ramp!.onramp({
   provider: "mercadopago",
   amount: 5000,            // ARS the user will pay
   currency: "ARS",
@@ -199,7 +217,7 @@ console.log(order.quote.cryptoAmount); // USDC they will receive
 // 2. Receive the Mercado Pago webhook. That's it — the engine verifies the
 // signature, checks the paid amount, and calls your settlement.
 app.post("/webhooks/mercadopago", express.json(), async (req, res) => {
-  const result = await ramp.handleWebhook("mercadopago", {
+  const result = await cosmos.ramp!.handleWebhook("mercadopago", {
     body: req.body,
     headers: req.headers,
     url: req.url,
@@ -210,9 +228,9 @@ app.post("/webhooks/mercadopago", express.json(), async (req, res) => {
 
 ```ts
 // 3. Optional: listen to what happens.
-ramp.on("payment:approved", (order) => console.log("paid", order.id));
-ramp.on("settlement:released", (order, { txId }) => console.log("USDC sent", txId));
-ramp.on("order:completed", (order) => console.log("done", order.id));
+cosmos.ramp!.on("payment:approved", (order) => console.log("paid", order.id));
+cosmos.ramp!.on("settlement:released", (order, { txId }) => console.log("USDC sent", txId));
+cosmos.ramp!.on("order:completed", (order) => console.log("done", order.id));
 ```
 
 ### How the quote works
@@ -235,13 +253,13 @@ order.quote;
 You can also quote without creating an order:
 
 ```ts
-const quote = await ramp.quote({ direction: "onramp", currency: "ARS", amount: 5000, spread: 0.02 });
+const quote = await cosmos.ramp!.quote({ direction: "onramp", currency: "ARS", amount: 5000, spread: 0.02 });
 ```
 
 ### Offramp: buy USDC back, pay out fiat
 
 ```ts
-const order = await ramp.offramp({
+const order = await cosmos.ramp!.offramp({
   provider: "mercadopago",
   cryptoAmount: 100,               // USDC the user sends you
   currency: "ARS",
@@ -250,39 +268,100 @@ const order = await ramp.offramp({
 });
 
 // Show the user your treasury wallet; when their USDC arrives:
-await ramp.confirmCryptoReceived(order.id, { txId: "..." });
+await cosmos.ramp!.confirmCryptoReceived(order.id, { txId: "..." });
 // → the engine pays out fiat via the provider automatically.
 // If the provider can't pay out, it emits "payout:required" so you can do it
-// your way, then call ramp.confirmPayoutSent(order.id).
+// your way, then call cosmos.ramp!.confirmPayoutSent(order.id).
 ```
 
-## CosmosClient: one client for everything
+## Etherfuse
 
-Configuring `CosmosRamp` + `MercadoPagoProvider` + `EtherfuseClient` + `KoyweClient` + SEP helpers separately means repeating setup and juggling imports. `CosmosClient` wires all of it from one config object and exposes each piece as a property:
+`cosmos.etherfuse` is a full ramp client for the [Etherfuse](https://docs.etherfuse.com) API (BRL·PIX and MXN·SPEI against Solana, Stellar, Base, Polygon, Monad). Unlike Mercado Pago (which only collects fiat — the crypto leg is your own `settlement`), Etherfuse moves the crypto itself, so it doesn't go through `cosmos.ramp`:
 
 ```ts
-import { CosmosClient } from "cosmos-providers";
+const cosmos = new CosmosClient({ etherfuse: { apiKey: process.env.ETHERFUSE_API_KEY!, environment: "sandbox" } });
 
-const cosmos = new CosmosClient({
-  mercadopago: { accounts: { ARS: { accessToken: process.env.MP_AR_ACCESS_TOKEN!, sandbox: true } } },
-  etherfuse: { apiKey: process.env.ETHERFUSE_API_KEY!, environment: "sandbox" },
-  koywe: { clientId: process.env.KOYWE_CLIENT_ID!, secret: process.env.KOYWE_SECRET!, environment: "sandbox" },
-  oracle: { apiKey: process.env.COINGECKO_API_KEY }, // optional
-  settlement: async ({ wallet, amount, asset }) => ({ txId: await myWallet.transfer(asset, amount, wallet) }),
-});
-
-cosmos.ramp;         // CosmosRamp, wired to the mercadopago provider above
-cosmos.mercadopago;  // MercadoPagoProvider, for createPaymentLink/createPixCharge directly
-cosmos.etherfuse;    // EtherfuseClient
-cosmos.koywe;        // KoyweClient
-cosmos.sep;          // { fetchStellarToml, authenticateSep10, startDeposit, ... }
+const quote = await cosmos.etherfuse!.quotes.create({ /* ... */ });
+const receipt = await quote.createOrder({ bankAccountId: "...", publicKey: "WALLET" });
+const qr = receipt.createPixQr();
 ```
 
-Pass only the pieces you need — `cosmos.ramp` is only built when at least one payment provider is configured, and `cosmos.sep` is always available even with an empty config (see the [SEP section](#sep-1--sep-10--sep-24--any-sep-compliant-anchor)).
+**Don't hardcode the target asset.** Etherfuse's onramp delivers one of its own tokenized stablebonds (CETES for MXN, TESOURO for BRL), not raw USDC, and which mint is "active" for a given chain rotates over time. Resolve it live instead:
+
+```ts
+const catalog = await cosmos.etherfuse!.lookup.stablebonds(); // public, no API key needed
+```
+
+Etherfuse webhook verification (Node-only) lives in the `cosmos-providers/webhooks` subpath. See [`examples/etherfuse/quickstart.ts`](./examples/etherfuse/quickstart.ts) for a minimal single-chain run, or [`examples/etherfuse/full-flow.ts`](./examples/etherfuse/full-flow.ts) for the complete flow across every supported chain, including automatic Stellar trustline setup.
+
+## Koywe
+
+`cosmos.koywe` is a dependency-free client for the [Koywe](https://docs-crypto.koywe.com) ramp API (ARS/CLP/MXN/COP/PEN/BRL ↔ USDC on Stellar). Like Etherfuse, Koywe delivers USDC directly to a Stellar address as part of the order, so it doesn't go through `cosmos.ramp` either:
+
+```ts
+const cosmos = new CosmosClient({
+  koywe: {
+    clientId: process.env.KOYWE_CLIENT_ID!,
+    secret: process.env.KOYWE_SECRET!,
+    environment: "sandbox", // or "production" — picks the matching base URL
+    usdcIssuer: process.env.PUBLIC_USDC_ISSUER,
+  },
+});
+
+// On-ramp: ARS -> USDC on Stellar
+const providers = await cosmos.koywe!.getPaymentProviders("ARS"); // WIREAR (CVU), QRI-AR (QR)...
+const quote = await cosmos.koywe!.getQuote({ ramp: "onramp", fiatCurrency: "ARS", amount: "10000", paymentMethodId: providers[0].id });
+const order = await cosmos.koywe!.createOnRampOrder({ quoteId: quote.id, stellarAddress: "USER_STELLAR_ADDRESS" });
+
+order.deposit?.cvu;      // WIREAR: CVU/alias to transfer to
+order.interactiveUrl;    // QRI/Khipu: hosted checkout URL instead
+
+// Off-ramp: USDC -> ARS to a registered bank account
+const account = await cosmos.koywe!.createBankAccount({ email, accountNumber, countryCode: "AR", currencySymbol: "ARS" });
+const offQuote = await cosmos.koywe!.getQuote({ ramp: "offramp", fiatCurrency: "ARS", amount: "100" });
+const offOrder = await cosmos.koywe!.createOffRampOrder({ quoteId: offQuote.id, bankAccountId: account.id });
+// user sends USDC to offOrder.depositAddress, then:
+await cosmos.koywe!.submitTxHash(offOrder.id, stellarTxHash);
+```
+
+Stellar addresses are validated locally (a from-scratch `StrKey` check — no `@stellar/stellar-sdk` dependency) before ever reaching the API. Poll orders with `cosmos.koywe!.getOrder(id)` (or `getOrderByExternalId` after a hosted redirect); delegated KYC lives in `createAccount` + `checkAccount`.
+
+## SEP-1 / SEP-10 / SEP-24
+
+`cosmos.sep` is always available, even with an empty `CosmosClient` config — composable, framework-agnostic functions for the Stellar Ecosystem Proposals that cover discovery → authentication → the hosted deposit/withdraw flow. Not tied to Koywe or Etherfuse — point them at any anchor's domain (a reference [test anchor](https://testanchor.stellar.org), Vibrant, Settle, your own SEP-24 server...):
+
+```ts
+const cosmos = new CosmosClient({}); // no providers needed — cosmos.sep still works
+
+// 1. SEP-1: discover the anchor's endpoints.
+const toml = await cosmos.sep.fetchStellarToml("testanchor.stellar.org");
+
+// 2. SEP-10: prove control of the account. The library never touches private
+//    keys — bring your own signer (a server-side Keypair, Freighter...).
+const jwt = await cosmos.sep.authenticateSep10({
+  webAuthEndpoint: toml.WEB_AUTH_ENDPOINT,
+  account: "USER_STELLAR_ADDRESS",
+  sign: (challengeXdr, networkPassphrase) => myWallet.signTransaction(challengeXdr, networkPassphrase),
+});
+
+// 3. SEP-24: kick off a deposit; open `url` for the user's hosted KYC/amount entry.
+const { url, id } = await cosmos.sep.startDeposit({
+  transferServer: toml.TRANSFER_SERVER_SEP0024,
+  jwt,
+  assetCode: "USDC",
+  account: "USER_STELLAR_ADDRESS",
+});
+
+// 4. Poll until it settles.
+const tx = await cosmos.sep.getSep24Transaction({ transferServer: toml.TRANSFER_SERVER_SEP0024, jwt, id });
+tx.status; // "completed" | "pending_user_transfer_start" | ... — see SEP24_TERMINAL_STATUSES
+```
+
+`startWithdraw` mirrors `startDeposit` for the Stellar → fiat direction. This covers SEP-1/10/24 (anchor discovery, auth, and the interactive flow that most anchors and wallets build against) — SEP-6/12/31/38 (programmatic transfers, dedicated KYC, direct fiat payments, and quotes) aren't implemented yet.
 
 ## Custom providers
 
-Wrap any payment API into a fully working provider — payment links, QRs, status normalization and webhooks included — without implementing `PaymentProvider` by hand. You supply the raw API calls; the responses are adapted to the Cosmos format automatically:
+Wrap any payment API into a fully working provider — payment links, QRs, status normalization and webhooks included — without implementing `PaymentProvider` by hand. Pass it to `CosmosClient` via `customProviders`, alongside (or instead of) `mercadopago`:
 
 ```ts
 import { createCustomProvider } from "cosmos-providers";
@@ -308,7 +387,7 @@ const acme = createCustomProvider({
   },
 });
 
-const ramp = new CosmosRamp({ providers: [acme], /* ... */ });
+const cosmos = new CosmosClient({ customProviders: [acme], settlement: /* ... */ });
 ```
 
 Common response fields (`checkout_url`, `init_point`, `payment_url`, `qr_code`, `qr_code_base64`, `transaction_amount`, `external_reference`, nested `data`/`payment` objects...) are auto-mapped. For unusual shapes, take full control with `adapt`:
@@ -323,15 +402,16 @@ createCustomProvider({
 });
 ```
 
-Whatever the adapters return is still normalized and validated (a charge without a link/QR/deposit fails fast at creation), so `ramp.handleWebhook` and `order.charge.link` behave identically across built-in and custom providers.
+Whatever the adapters return is still normalized and validated (a charge without a link/QR/deposit fails fast at creation), so `cosmos.ramp!.handleWebhook` and `order.charge.link` behave identically across built-in and custom providers.
 
 ## Emitting your own webhooks
 
-Get notified on your backend(s) whenever an order moves:
+Get notified on your backend(s) whenever an order moves — pass `webhooks` to `CosmosClient`:
 
 ```ts
-const ramp = new CosmosRamp({
-  // ...
+const cosmos = new CosmosClient({
+  mercadopago: { accessToken: process.env.MP_ACCESS_TOKEN!, sandbox: true },
+  settlement: /* ... */,
   webhooks: {
     endpoints: [{ url: "https://myapp.com/hooks/cosmos", secret: process.env.HOOK_SECRET }],
   },
@@ -350,10 +430,10 @@ Events: `order.created`, `payment.approved`, `payment.rejected`, `payment.mismat
 
 ## Persistence
 
-By default orders live in memory (fine for dev). In production, implement the small `OrderStore` interface (5 methods) over your database and pass it as `store`.
+By default `cosmos.ramp` keeps orders in memory (fine for dev). In production, implement the small `OrderStore` interface (5 methods) over your database and pass it as `store`:
 
 ```ts
-const ramp = new CosmosRamp({ store: new MyPostgresStore(), /* ... */ });
+const cosmos = new CosmosClient({ mercadopago: { /* ... */ }, settlement: /* ... */, store: new MyPostgresStore() });
 ```
 
 ## Safety model
@@ -361,11 +441,11 @@ const ramp = new CosmosRamp({ store: new MyPostgresStore(), /* ... */ });
 - Webhook bodies are never trusted: the engine re-fetches the payment from the provider API before settling.
 - The paid amount must match the quoted amount (± `defaults.amountTolerance`).
 - Duplicate webhooks are idempotent — an order settles once.
-- If your settlement throws, the order stays in `"settling"`; retry with `ramp.retrySettlement(orderId)`.
+- If your settlement throws, the order stays in `"settling"`; retry with `cosmos.ramp!.retrySettlement(orderId)`.
 
 ## Standalone PIX QR codes
 
-Generate and parse PIX BR Codes (EMV "copia e cola") without any API:
+Generate and parse PIX BR Codes (EMV "copia e cola") without any API — no `CosmosClient` needed, this one's a plain utility:
 
 ```ts
 import { Pix } from "cosmos-providers";
@@ -382,99 +462,6 @@ qr.toString();        // "copia e cola" payload
 Pix.parse("00020126..."); // decode + validate any BR Code
 ```
 
-## Etherfuse client (PIX/SPEI ramp API)
-
-The package also ships a full client for the [Etherfuse](https://docs.etherfuse.com) ramp API (BRL·PIX and MXN·SPEI against Solana, Stellar, Base, Polygon, Monad). Unlike `MercadoPagoProvider` (which only collects fiat — the crypto leg is your own `settlement`), Etherfuse moves the crypto itself, so it's a standalone client rather than a `PaymentProvider`:
-
-```ts
-import { EtherfuseClient } from "cosmos-providers";
-
-const client = new EtherfuseClient({ apiKey: process.env.ETHERFUSE_API_KEY!, environment: "sandbox" });
-
-const quote = await client.quotes.create({ /* ... */ });
-const receipt = await quote.createOrder({ bankAccountId: "...", publicKey: "WALLET" });
-const qr = receipt.createPixQr();
-```
-
-**Don't hardcode the target asset.** Etherfuse's onramp delivers one of its own tokenized stablebonds (CETES for MXN, TESOURO for BRL), not raw USDC, and which mint is "active" for a given chain rotates over time. Resolve it live instead:
-
-```ts
-const catalog = await client.lookup.stablebonds(); // public, no API key needed
-```
-
-Etherfuse webhook verification (Node-only) lives in the `cosmos-providers/webhooks` subpath. See [`examples/full-flow.ts`](./examples/full-flow.ts) for the complete flow across every supported chain, including automatic Stellar trustline setup.
-
-## Koywe client (ARS/CLP/MXN/COP/PEN/BRL ↔ USDC on Stellar)
-
-A dependency-free client for the [Koywe](https://docs-crypto.koywe.com) ramp API. Like Etherfuse, Koywe delivers USDC directly to a Stellar address as part of the order, so it's exposed as a standalone client:
-
-```ts
-import { KoyweClient } from "cosmos-providers";
-
-const koywe = new KoyweClient({
-  clientId: process.env.KOYWE_CLIENT_ID!,
-  secret: process.env.KOYWE_SECRET!,
-  environment: "sandbox", // or "production" — picks the matching base URL
-  usdcIssuer: process.env.PUBLIC_USDC_ISSUER,
-});
-
-// On-ramp: ARS -> USDC on Stellar
-const providers = await koywe.getPaymentProviders("ARS"); // WIREAR (CVU), QRI-AR (QR)...
-const quote = await koywe.getQuote({ ramp: "onramp", fiatCurrency: "ARS", amount: "10000", paymentMethodId: providers[0].id });
-const order = await koywe.createOnRampOrder({ quoteId: quote.id, stellarAddress: "USER_STELLAR_ADDRESS" });
-
-order.deposit?.cvu;      // WIREAR: CVU/alias to transfer to
-order.interactiveUrl;    // QRI/Khipu: hosted checkout URL instead
-
-// Off-ramp: USDC -> ARS to a registered bank account
-const account = await koywe.createBankAccount({ email, accountNumber, countryCode: "AR", currencySymbol: "ARS" });
-const offQuote = await koywe.getQuote({ ramp: "offramp", fiatCurrency: "ARS", amount: "100" });
-const offOrder = await koywe.createOffRampOrder({ quoteId: offQuote.id, bankAccountId: account.id });
-// user sends USDC to offOrder.depositAddress, then:
-await koywe.submitTxHash(offOrder.id, stellarTxHash);
-```
-
-Stellar addresses are validated locally (a from-scratch `StrKey` check — no `@stellar/stellar-sdk` dependency) before ever reaching the API. Poll orders with `koywe.getOrder(id)` (or `getOrderByExternalId` after a hosted redirect); delegated KYC lives in `createAccount` + `checkAccount`.
-
-## SEP-1 / SEP-10 / SEP-24 — any SEP-compliant anchor
-
-Composable, framework-agnostic functions for the Stellar Ecosystem Proposals that cover discovery → authentication → the hosted deposit/withdraw flow. Not tied to Koywe or Etherfuse — point them at any anchor's domain (a reference [test anchor](https://testanchor.stellar.org), Vibrant, Settle, your own SEP-24 server...):
-
-```ts
-import { fetchStellarToml, authenticateSep10, startDeposit, getSep24Transaction } from "cosmos-providers";
-
-// 1. SEP-1: discover the anchor's endpoints.
-const toml = await fetchStellarToml("testanchor.stellar.org");
-
-// 2. SEP-10: prove control of the account. The library never touches private
-//    keys — bring your own signer (a server-side Keypair, Freighter...).
-const jwt = await authenticateSep10({
-  webAuthEndpoint: toml.WEB_AUTH_ENDPOINT,
-  account: "USER_STELLAR_ADDRESS",
-  sign: (challengeXdr, networkPassphrase) => myWallet.signTransaction(challengeXdr, networkPassphrase),
-});
-
-// 3. SEP-24: kick off a deposit; open `url` for the user's hosted KYC/amount entry.
-const { url, id } = await startDeposit({
-  transferServer: toml.TRANSFER_SERVER_SEP0024,
-  jwt,
-  assetCode: "USDC",
-  account: "USER_STELLAR_ADDRESS",
-});
-
-// 4. Poll until it settles.
-const tx = await getSep24Transaction({ transferServer: toml.TRANSFER_SERVER_SEP0024, jwt, id });
-tx.status; // "completed" | "pending_user_transfer_start" | ... — see SEP24_TERMINAL_STATUSES
-```
-
-`startWithdraw` mirrors `startDeposit` for the Stellar → fiat direction. This covers SEP-1/10/24 (anchor discovery, auth, and the interactive flow that most anchors and wallets build against) — SEP-6/12/31/38 (programmatic transfers, dedicated KYC, direct fiat payments, and quotes) aren't implemented yet.
-
-Or reach these same helpers off a `CosmosClient` with no providers configured — see [CosmosClient](#cosmosclient-one-client-for-everything):
-
-```ts
-const { fetchStellarToml, authenticateSep10 } = new CosmosClient({}).sep;
-```
-
 ## Standard identifiers: Chain, Asset, FiatCurrency, Country
 
 Every provider/client in this library shares one set of identifiers instead of scattering raw string literals — `Chain.Stellar` instead of `"stellar"`, `Asset.USDC` instead of `"USDC"`. A typo becomes a compile error instead of a silent 404:
@@ -489,7 +476,17 @@ FiatCurrency.ARS;    // "ARS" — also: BRL, MXN, CLP, COP, PEN, UYU
 Country.AR;          // "AR" — also: BR, MX, CL, CO, PE, UY
 ```
 
-Each is a frozen const object that also works as a type (`function f(c: Chain) {}` and `f(Chain.Stellar)` both type-check) — a `Chain` **is** the string `"stellar"` at runtime, so this is purely a typed front door: existing code that already passes plain strings keeps working unchanged. Stablebond addresses (which mint on which chain) are deliberately **not** baked into `Asset` — resolve those at runtime from `client.lookup.stablebonds()` or `client.assets.list()`, never hardcode them (see the [Etherfuse client](#etherfuse-client-pixspei-ramp-api) section).
+Each is a frozen const object that also works as a type (`function f(c: Chain) {}` and `f(Chain.Stellar)` both type-check) — a `Chain` **is** the string `"stellar"` at runtime, so this is purely a typed front door: existing code that already passes plain strings keeps working unchanged. Stablebond addresses (which mint on which chain) are deliberately **not** baked into `Asset` — resolve those at runtime from `cosmos.etherfuse!.lookup.stablebonds()`, never hardcode them (see [Etherfuse](#etherfuse) above).
+
+## Using the pieces directly
+
+`CosmosClient` is the recommended entry point, but every piece it wires up is also a plain, independently importable class/function, for when you'd rather not go through the unified client — a library embedding just the PIX QR engine, or a service that only ever talks to one provider:
+
+```ts
+import { CosmosRamp, MercadoPagoProvider, EtherfuseClient, KoyweClient, CoinGeckoOracle, fetchStellarToml } from "cosmos-providers";
+```
+
+`CosmosClient` itself is a thin composition layer over exactly these — `new CosmosClient({ mercadopago, settlement })` and `new CosmosRamp({ providers: [new MercadoPagoProvider(mercadopago)], settlement })` end up equivalent. Everything documented above under each provider's `cosmos.X` still applies one-for-one to the class directly (`new MercadoPagoProvider(...)` has the exact same `createPaymentLink`/`createPixCharge`/etc. as `cosmos.mercadopago`).
 
 ## Errors
 
@@ -505,16 +502,44 @@ Each is a frozen const object that also works as a type (`function f(c: Chain) {
 
 ## Examples
 
-Every example in [`examples/`](./examples) is standalone and runnable — the snippets throughout this README are excerpts of these files:
+Every example in [`examples/`](./examples) is standalone and runnable — the snippets throughout this README are excerpts of these files. They're organized one folder per provider:
+
+```
+examples/
+├── quickstart.ts                        full CosmosClient + automatic settlement, one file
+├── all-flows.ts                         runs everything below, one after another (npm run flow:all)
+├── mercadopago/
+│   ├── payment-link.ts                  npm run flow:mercadopago:link
+│   ├── pix.ts                           npm run flow:mercadopago:pix
+│   ├── settlement-demo.ts               npm run demo — simulated webhook → automatic USDC release
+│   ├── demo-ui.ts                       npm run demo:ui — same demo, in a local web UI
+│   ├── confirm-order-on-return.ts       fallback for when the webhook is slow/unreachable
+│   └── webhook-server.ts                minimal Node webhook receiver
+├── etherfuse/
+│   ├── quickstart.ts                    npm run flow:etherfuse:quickstart — single chain, minimal
+│   ├── full-flow.ts                     npm run flow — every supported chain + trustlines
+│   └── webhook-server.ts                Express webhook receiver (illustrative)
+├── koywe/
+│   └── full-flow.ts                     npm run flow:koywe — on-ramp + off-ramp + KYC
+├── sep/
+│   └── full-flow.ts                     npm run flow:sep — SEP-1/10/24 against the public test anchor
+└── frontend/
+    └── pix-qr.tsx                       React PIX QR + rate display (illustrative)
+```
 
 ```bash
+npm run demo                    # settlement demo: simulated webhook → automatic USDC release
+npm run demo:ui                 # same demo, with a local web UI at http://localhost:4000
 npm run flow:mercadopago:link   # Mercado Pago payment link
 npm run flow:mercadopago:pix    # Mercado Pago PIX (needs a real production BRL account)
 npm run flow                    # Etherfuse, every supported chain
+npm run flow:etherfuse:quickstart # Etherfuse, single chain, minimal
 npm run flow:koywe              # Koywe on-ramp + off-ramp + KYC
 npm run flow:sep                # SEP-1/10/24 against the public test anchor
 npm run flow:all                # everything above, one after another
 ```
+
+These example scripts read per-country/per-provider env vars from `.env` (`MP_AR_ACCESS_TOKEN`/`MP_BR_ACCESS_TOKEN`, `ETHERFUSE_API_KEY`, `KOYWE_CLIENT_ID`/`KOYWE_SECRET`, ...) purely so they're runnable without editing code — that's the scripts calling `process.env.X` themselves and passing it to `CosmosClient`, same as the Configuration section above. See `.env.example` for the full list.
 
 ## Scripts
 

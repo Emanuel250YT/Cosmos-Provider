@@ -1,7 +1,7 @@
 /**
  * Local demo UI: a small web page with one button per engine action.
  *
- *   npm run demo:ui     (or: npx tsx examples/demo-ui.ts)
+ *   npm run demo:ui     (or: npx tsx examples/mercadopago/demo-ui.ts)
  *   → open http://localhost:4000
  *
  * Runs fully offline against the Mercado Pago simulator: create quotes,
@@ -12,8 +12,8 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import QRCode from "qrcode";
-import { CosmosRamp, MercadoPagoProvider } from "../src/index";
-import { createMockMercadoPago } from "./helpers/mock-mercadopago";
+import { CosmosRamp, MercadoPagoProvider } from "../../src/index";
+import { createMockMercadoPago } from "../helpers/mock-mercadopago";
 
 const PORT = 4000;
 const WEBHOOK_SECRET = "demo-mp-secret";

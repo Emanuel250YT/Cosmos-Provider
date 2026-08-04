@@ -5,15 +5,15 @@
  * market (AR, BR, MX, CL, CO, PE, UY) and is the one that's actually usable
  * against sandbox/test credentials. PIX (Brazil's other rail) is different
  * enough — and unavailable in sandbox — that it gets its own example, see
- * examples/mercadopago-pix.ts.
+ * examples/mercadopago/pix.ts.
  *
- * Run:  npx tsx examples/mercadopago-payment-link.ts
+ * Run:  npx tsx examples/mercadopago/payment-link.ts
  * Env:  MP_AR_ACCESS_TOKEN and/or MP_BR_ACCESS_TOKEN in .env
  */
 
 import "dotenv/config";
-import { MercadoPagoProvider, type Charge } from "../src/index";
-import { isMainModule } from "./helpers/isMain";
+import { MercadoPagoProvider, type Charge } from "../../src/index";
+import { isMainModule } from "../helpers/isMain";
 
 export async function createPaymentLinkExample(): Promise<Charge | null> {
   const arToken = process.env.MP_AR_ACCESS_TOKEN;

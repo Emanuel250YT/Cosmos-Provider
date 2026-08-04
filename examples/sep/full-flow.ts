@@ -7,7 +7,7 @@
  *
  * Run: `npm run flow:sep` (or `ANCHOR_DOMAIN=some-other-anchor.com npm run flow:sep`).
  *
- * DESIGN (same as examples/full-flow.ts):
+ * DESIGN (same as examples/etherfuse/full-flow.ts):
  * - SEP-1 (discovery), SEP-10 (auth), and SEP-24 (interactive deposit) each
  *   run in their own try/catch — if one fails, the error is logged and the
  *   flow continues (without a JWT, SEP-24 can't be attempted, so that step
@@ -22,8 +22,8 @@
 
 import "dotenv/config";
 import { Keypair, Horizon, TransactionBuilder } from "@stellar/stellar-sdk";
-import { CosmosClient, SEP24_TERMINAL_STATUSES } from "../src/index";
-import { isMainModule } from "./helpers/isMain";
+import { CosmosClient, SEP24_TERMINAL_STATUSES } from "../../src/index";
+import { isMainModule } from "../helpers/isMain";
 
 // `CosmosClient` with no providers still gives you `.sep` — the SEP-1/10/24
 // helpers bound in one place, without importing each loose function.

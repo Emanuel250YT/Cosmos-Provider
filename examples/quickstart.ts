@@ -13,6 +13,8 @@ const ramp = new CosmosRamp({
       accessToken: process.env.MP_ACCESS_TOKEN!,
       webhookSecret: process.env.MP_WEBHOOK_SECRET,
       notificationUrl: "https://myapp.com/webhooks/mercadopago",
+      // Explicit, not inferred from the token — see README, "Sandbox vs. production".
+      sandbox: true,
     }),
   ],
   oracle: new CoinGeckoOracle({ apiKey: process.env.COINGECKO_API_KEY }), // key optional
@@ -41,7 +43,7 @@ async function main() {
   console.log("USDC to send:", order.quote.cryptoAmount);
 
   // From here on, everything is automatic: when Mercado Pago notifies the
-  // payment (see examples/mercadopago-webhook-server.ts), the engine verifies
+  // payment (see examples/mercadopago/webhook-server.ts), the engine verifies
   // it, checks the amount, and calls `settlement` to release the USDC.
 }
 

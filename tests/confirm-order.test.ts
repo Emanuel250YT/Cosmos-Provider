@@ -1,7 +1,7 @@
 /**
  * Tests for the `confirmOrderOnReturn` fallback in
- * `examples/confirm-order-on-return.ts` — settles an order when the user
- * returns from checkout before the Mercado Pago webhook has arrived.
+ * `examples/mercadopago/confirm-order-on-return.ts` — settles an order when
+ * the user returns from checkout before the Mercado Pago webhook has arrived.
  *
  * Drives the exact `ramp`/`provider`/`mp` instances the runnable script uses
  * (exported for this purpose), so this is the same end-to-end path, just
@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { confirmOrderOnReturn, ramp, mp } from "../examples/confirm-order-on-return";
+import { confirmOrderOnReturn, ramp, mp } from "../examples/mercadopago/confirm-order-on-return";
 
 function extractPaymentId(webhookBody: string): string {
   return String((JSON.parse(webhookBody) as { data: { id: number } }).data.id);

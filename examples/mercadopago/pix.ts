@@ -7,16 +7,16 @@
  * creates a REAL charge (unpaid until someone actually scans the QR).
  * `MercadoPagoProvider.createPixCharge` throws immediately if you point it
  * at a sandbox account, rather than letting the API fail with a confusing
- * 401 — see examples/mercadopago-payment-link.ts for the rail that DOES
+ * 401 — see examples/mercadopago/payment-link.ts for the rail that DOES
  * work in sandbox.
  *
- * Run:  npx tsx examples/mercadopago-pix.ts
+ * Run:  npx tsx examples/mercadopago/pix.ts
  * Env:  MP_BR_ACCESS_TOKEN in .env
  */
 
 import "dotenv/config";
-import { MercadoPagoProvider, type Charge } from "../src/index";
-import { isMainModule } from "./helpers/isMain";
+import { MercadoPagoProvider, type Charge } from "../../src/index";
+import { isMainModule } from "../helpers/isMain";
 
 export async function createPixChargeExample(): Promise<Charge | null> {
   const accessToken = process.env.MP_BR_ACCESS_TOKEN;

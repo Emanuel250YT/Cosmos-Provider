@@ -6,17 +6,20 @@
  * verifies the x-signature header, re-fetches the payment, matches the
  * order, and releases the crypto through your settlement.
  *
- * Run with: npx tsx examples/mercadopago-webhook-server.ts
+ * Run with: npx tsx examples/mercadopago/webhook-server.ts
  */
 
 import { createServer } from "node:http";
-import { CosmosRamp, CoinGeckoOracle, MercadoPagoProvider } from "../src/index";
+import { CosmosRamp, CoinGeckoOracle, MercadoPagoProvider } from "../../src/index";
 
 const ramp = new CosmosRamp({
   providers: [
     new MercadoPagoProvider({
       accessToken: process.env.MP_ACCESS_TOKEN!,
       webhookSecret: process.env.MP_WEBHOOK_SECRET,
+      // Set this explicitly for your deployment — never inferred from the
+      // token's format. See README, "Sandbox vs. production".
+      sandbox: false,
     }),
   ],
   oracle: new CoinGeckoOracle({ apiKey: process.env.COINGECKO_API_KEY }), // key optional

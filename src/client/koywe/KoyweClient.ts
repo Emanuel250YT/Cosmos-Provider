@@ -512,7 +512,7 @@ export class KoyweClient {
         }),
       });
     } catch (cause) {
-      throw new KoyweError("Network error on POST /rest/auth", "NETWORK_ERROR", undefined);
+      throw new KoyweError("Network error on POST /rest/auth", "NETWORK_ERROR", undefined, { cause });
     }
 
     if (!response.ok) {
@@ -548,7 +548,7 @@ export class KoyweClient {
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch (cause) {
-      throw new KoyweError(`Network error on ${method} ${endpoint}`, "NETWORK_ERROR", undefined);
+      throw new KoyweError(`Network error on ${method} ${endpoint}`, "NETWORK_ERROR", undefined, { cause });
     }
 
     if (!response.ok) {
