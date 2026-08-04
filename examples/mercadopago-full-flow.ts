@@ -6,18 +6,16 @@
  * chequeo de estado sin bloquear.
  *
  * MULTI-CUENTA: Mercado Pago emite una cuenta de comercio (y access token)
- * DISTINTA por país — un token de Argentina no puede procesar un cobro de
- * Brasil/PIX, y viceversa. En vez de crear un `CosmosClient` por país, este
- * script arma UNO SOLO con `mercadopago.accounts` — una entrada por moneda
- * (ARS, BRL...) — y `client.ramp.onramp({ provider: "mercadopago",
- * currency: "ARS" | "BRL", ... })` rutea sola a la cuenta correcta. Ver la
- * sección "Mercado Pago multi-account" del README.
+ * DISTINTA por país — no existe una cuenta "por defecto". Por eso este
+ * script no tiene fallback a una sola credencial: arma `mercadopago.accounts`
+ * directo con una entrada por moneda (ARS desde `MP_AR_ACCESS_TOKEN`, BRL
+ * desde `MP_BR_ACCESS_TOKEN` — alcanza con tener una de las dos en `.env`) y
+ * `client.ramp.onramp({ provider: "mercadopago", currency: "ARS" | "BRL",
+ * ... })` rutea sola a la cuenta correcta. Ver la sección "Mercado Pago
+ * multi-account" del README.
  *
- * Preparación: `MP_AR_ACCESS_TOKEN` / `MP_BR_ACCESS_TOKEN` en `.env`, con
- * tokens `TEST-...` de sandbox (si solo tenés una cuenta, `MP_ACCESS_TOKEN`
- * solo también funciona). Ejecutá `npm run flow:mercadopago`. Si lo único
- * que tenés cargado es un token de producción (`APP_USR-...`), el flujo lo
- * salta y te avisa por qué — ver "POR DEFECTO, SOLO SANDBOX" más abajo.
+ * Preparación: `MP_AR_ACCESS_TOKEN` y/o `MP_BR_ACCESS_TOKEN` en `.env`.
+ * Ejecutá `npm run flow:mercadopago`.
  *
  * DISEÑO (igual que examples/full-flow.ts):
  * - Cada método de pago corre en su propio try/catch — si uno falla (p. ej.
@@ -28,108 +26,63 @@
  *   por eso se hace UN chequeo de estado (`getCharge`) después de crear cada
  *   orden y lo que no sea un estado terminal queda anotado "pending". Para
  *   ver una orden pasar a "approved" de verdad hay que abrir el link y
- *   pagarlo (con tarjetas de prueba si el token es `TEST-...`).
+ *   pagarlo (con tarjetas de prueba si la cuenta es de sandbox).
  * - Al final SIEMPRE se imprime un resumen con todo lo creado — links, QRs,
  *   quotes, ids — aunque algún método haya fallado.
+ *
+ * SANDBOX: esto es una LIBRERÍA — el modo sandbox/producción no se adivina
+ * del formato del token ni se lee de ninguna variable de entorno, es una
+ * decisión de código que toma quien construye el provider. Mercado Pago
+ * emite el mismo prefijo `APP_USR-...` tanto para cuentas reales como para
+ * cada "usuario de prueba" (cuenta sandbox) que crees, así que el prefijo
+ * nunca es una señal confiable. Por eso `buildMercadoPagoConfig()` más abajo
+ * pasa `sandbox: true` A MANO en cada cuenta: este es un script de
+ * ejemplo/test, así que SIEMPRE corre en modo sandbox por defecto, sin
+ * importar qué token cargues en `.env`. Si alguna vez necesitás correr este
+ * mismo script contra la cuenta real, cambiá ese `sandbox: true` por
+ * `sandbox: false` ahí mismo — a mano, en el código.
  *
  * Con credenciales de producción reales, ya vimos que Checkout Pro (link)
  * funciona pero PIX/QR directo (`POST /v1/payments`) puede devolver
  * "Unauthorized use of live credentials" — Mercado Pago aprueba el acceso a
  * la Payments API por separado del Checkout Pro básico. Es una restricción
  * real de la cuenta/aplicación, no un bug de esta librería.
- *
- * POR DEFECTO, SOLO SANDBOX — y el modo se declara EXPLÍCITAMENTE, no se
- * adivina del prefijo del token: Mercado Pago genera credenciales
- * `APP_USR-...` (formato "producción") tanto para tu cuenta real como para
- * cada "usuario de prueba" (cuenta sandbox) que crees — el prefijo NO
- * distingue una de otra, solo la cuenta que la emitió lo sabe. Por eso cada
- * cuenta tiene su propio flag `MP_*_SANDBOX` en `.env`:
- *   - `"true"`  → sandbox de verdad (aunque el token sea `APP_USR-...`):
- *                 corre por defecto, y `MercadoPagoProvider` usa
- *                 `sandbox_init_point` para los links de Checkout Pro.
- *   - `"false"` o sin declarar → se asume producción; el flujo la SALTEA
- *                 salvo que pongas `MP_ALLOW_PRODUCTION="true"` en `.env`.
- * Un token que sí empieza con `TEST-` se trata como sandbox aunque no
- * declares el flag (ese prefijo sí es inequívoco).
  */
 
 import "dotenv/config";
 import { CosmosClient, FiatCurrency, type MercadoPagoProviderOptions, type RampOrderData } from "../src/index";
 import { isMainModule } from "./helpers/isMain";
 
-const ALLOW_PRODUCTION = process.env.MP_ALLOW_PRODUCTION === "true";
-
 /**
- * `true`/`false` si `envFlag` lo declara explícitamente (p. ej.
- * `MP_BR_SANDBOX`); si no está seteado, cae al prefijo `TEST-...` del token
- * — el único caso donde el prefijo alcanza para saber el modo sin dudar.
- */
-function resolveSandbox(token: string, envFlag: string | undefined): boolean {
-  if (envFlag === "true") return true;
-  if (envFlag === "false") return false;
-  return token.startsWith("TEST-");
-}
-
-/**
- * Arma la config de `mercadopago` a partir de `.env`: si hay credenciales
- * por país (`MP_AR_ACCESS_TOKEN`/`MP_BR_ACCESS_TOKEN`) arma `accounts` con
- * una entrada por moneda; si no, cae a la única `MP_ACCESS_TOKEN` como
- * cuenta por defecto. Una cuenta que resuelve a NO-sandbox (ver
- * `resolveSandbox`) se ignora salvo `MP_ALLOW_PRODUCTION=true` (ver cabecera
- * del archivo). `null` si no queda ninguna credencial usable — el flujo
- * entero se saltea.
+ * Arma la config de `mercadopago` a partir de `.env`: una entrada por país
+ * en `accounts` (ARS desde `MP_AR_ACCESS_TOKEN`, BRL desde
+ * `MP_BR_ACCESS_TOKEN`) — sin cuenta "por defecto", porque Mercado Pago no
+ * tiene una. `sandbox: true` va fijo a mano acá (ver cabecera del archivo):
+ * `null` si no hay ninguna credencial en `.env` — el flujo entero se
+ * saltea.
  */
 function buildMercadoPagoConfig(): MercadoPagoProviderOptions | null {
   const ar = process.env.MP_AR_ACCESS_TOKEN;
   const br = process.env.MP_BR_ACCESS_TOKEN;
-  const single = process.env.MP_ACCESS_TOKEN;
-  const skippedProduction: string[] = [];
+  if (!ar && !br) return null;
 
   const accounts: NonNullable<MercadoPagoProviderOptions["accounts"]> = {};
-  const tryAdd = (
-    currency: string,
-    token: string | undefined,
-    webhookSecret: string | undefined,
-    sandboxFlag: string | undefined,
-    extra?: Record<string, unknown>,
-  ) => {
-    if (!token) return;
-    const sandbox = resolveSandbox(token, sandboxFlag);
-    if (!sandbox && !ALLOW_PRODUCTION) {
-      skippedProduction.push(currency);
-      return;
-    }
-    accounts[currency] = { accessToken: token, sandbox, webhookSecret, ...extra };
-  };
-  tryAdd(FiatCurrency.ARS, ar, process.env.MP_AR_WEBHOOK_SECRET, process.env.MP_AR_SANDBOX);
-  tryAdd(FiatCurrency.BRL, br, process.env.MP_BR_WEBHOOK_SECRET, process.env.MP_BR_SANDBOX, {
-    defaultPayerEmail: "sandbox-buyer@example.com.br",
-  });
-
-  if (Object.keys(accounts).length > 0) return { accounts };
-
-  if (single) {
-    const sandbox = resolveSandbox(single, process.env.MP_SANDBOX);
-    if (sandbox || ALLOW_PRODUCTION) {
-      return {
-        accessToken: single,
-        sandbox,
-        webhookSecret: process.env.MP_WEBHOOK_SECRET,
-        defaultPayerEmail: "sandbox-buyer@example.com",
-      };
-    }
-    skippedProduction.push("default (MP_ACCESS_TOKEN)");
+  if (ar) {
+    accounts[FiatCurrency.ARS] = {
+      accessToken: ar,
+      sandbox: true,
+      webhookSecret: process.env.MP_AR_WEBHOOK_SECRET,
+    };
   }
-
-  if (skippedProduction.length > 0) {
-    console.error(
-      `⚠ Mercado Pago (${skippedProduction.join(", ")}) resuelve a PRODUCCIÓN (ni el prefijo del token es ` +
-        `"TEST-..." ni hay un MP_*_SANDBOX="true" declarado) y MP_ALLOW_PRODUCTION no es "true" — por defecto ` +
-        `este flujo solo corre en sandbox. Si en realidad es un usuario de prueba, declará MP_AR_SANDBOX/` +
-        `MP_BR_SANDBOX/MP_SANDBOX="true" en .env; si es tu cuenta real, seteá MP_ALLOW_PRODUCTION="true".`,
-    );
+  if (br) {
+    accounts[FiatCurrency.BRL] = {
+      accessToken: br,
+      sandbox: true,
+      webhookSecret: process.env.MP_BR_WEBHOOK_SECRET,
+      defaultPayerEmail: "sandbox-buyer@example.com.br",
+    };
   }
-  return null;
+  return { accounts };
 }
 
 interface MethodPlan {
@@ -223,15 +176,9 @@ export async function runMercadoPagoFlow(): Promise<MethodResult[] | null> {
   const mercadopago = buildMercadoPagoConfig();
   if (!mercadopago) {
     console.error(
-      "⚠ Faltan credenciales de Mercado Pago (MP_AR_ACCESS_TOKEN/MP_BR_ACCESS_TOKEN o MP_ACCESS_TOKEN en .env) — salteo este flujo.",
+      "⚠ Faltan credenciales de Mercado Pago (MP_AR_ACCESS_TOKEN y/o MP_BR_ACCESS_TOKEN en .env) — salteo este flujo.",
     );
     return null;
-  }
-  if (ALLOW_PRODUCTION) {
-    console.warn(
-      "⚠ MP_ALLOW_PRODUCTION=\"true\": las órdenes que se crean acá son reales " +
-        "(aunque no se cobra nada sin abrir y pagar el link).",
-    );
   }
 
   const cosmos = new CosmosClient({
