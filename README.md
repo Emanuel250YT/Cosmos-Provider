@@ -4,6 +4,37 @@ Crypto onramp/offramp toolkit for Latin America. **One client, `CosmosClient`**,
 
 **Documentation in other languages:** [Español](./readme/README.es.md) · [Português](./readme/README.pt-BR.md)
 
+## Contents
+
+- [Install](#install)
+- [Quickstart](#quickstart)
+  - [Less code: skip `cosmos.mercadopago!`/`cosmos.koywe!`](#less-code-skip-cosmosmercadopago-cosmoskoywe)
+  - [`cosmos.createPaymentLink(...)`: the same process for every provider](#cosmoscreatepaymentlink-the-same-process-for-every-provider)
+- [Features](#features)
+- [Configuration](#configuration)
+- [Try it locally (no credentials needed)](#try-it-locally-no-credentials-needed)
+- [Mercado Pago](#mercado-pago)
+  - [Sandbox vs. production](#sandbox-vs-production)
+  - [Multi-account: one merchant per country](#multi-account-one-merchant-per-country)
+  - [Webhook verification](#webhook-verification)
+- [Automatic settlement](#automatic-settlement)
+  - [How the quote works](#how-the-quote-works)
+  - [Offramp: buy USDC back, pay out fiat](#offramp-buy-usdc-back-pay-out-fiat)
+- [Etherfuse](#etherfuse)
+- [Koywe](#koywe)
+- [SEP-1 / SEP-10 / SEP-24](#sep-1--sep-10--sep-24)
+- [Custom providers](#custom-providers)
+- [Emitting your own webhooks](#emitting-your-own-webhooks)
+- [Persistence](#persistence)
+- [Safety model](#safety-model)
+- [Standalone PIX QR codes](#standalone-pix-qr-codes)
+- [Standard identifiers: Chain, Asset, FiatCurrency, Country](#standard-identifiers-chain-asset-fiatcurrency-country)
+- [Using the pieces directly](#using-the-pieces-directly)
+- [Errors](#errors)
+- [Examples](#examples)
+- [Scripts](#scripts)
+- [License](#license)
+
 ## Install
 
 ```bash
@@ -62,6 +93,64 @@ cosmos.ramp;         // CosmosRamp — only built once a fiat provider + settlem
 ```
 
 Every section below configures one more corner of this same object. Every example is copy-paste-runnable the same way: save it, set the env vars it names, `npx tsx <file>.ts`. The [`examples/`](./examples) folder has the complete, runnable version of each one, plus `npm run flow:all` to run everything in sequence.
+
+### Less code: skip `cosmos.mercadopago!`/`cosmos.koywe!`
+
+Every `MercadoPagoProvider`/`KoyweClient` method shown throughout this README is also callable directly on `cosmos` — no `.mercadopago!`/`.koywe!`, no null-check:
+
+```ts
+// Identical to `cosmos.mercadopago!.createPixCharge(...)` — just less to type.
+const charge = await cosmos.createPixCharge({ amount: 50, reference: "order-1" });
+```
+
+If you've only configured one of `mercadopago`/`koywe`, that's the one used — automatically, there's nothing to pick. If you've configured **both**, and call a method both happen to implement, say which one with `provider` as the first argument (it's stripped before the real method sees the request):
+
+```ts
+await cosmos.getQuote({ provider: "koywe", ramp: "onramp", fiatCurrency: "ARS", amount: "10000" });
+```
+
+Omitting `provider` while it's genuinely ambiguous **throws**, with both candidates named in the message — it never silently guesses which one you meant. `cosmos.etherfuse` isn't part of this: its API is organized into namespaces (`cosmos.etherfuse.quotes`, `.bankAccounts`, `.wallets`, ...) rather than flat top-level methods like `mercadopago`/`koywe`, so it stays explicit — `cosmos.etherfuse!.quotes.create(...)`.
+
+This is purely a shortcut: `cosmos.mercadopago`/`cosmos.koywe` keep working exactly as shown in every other example in this README, and reach for them directly whenever you want to be explicit (or need a method not in this list, like `mercadopago.regions`/`koywe.environment`).
+
+### `cosmos.createPaymentLink(...)`: the same process for every provider
+
+Unlike the shortcut above (a 1:1 forward), `createPaymentLink` is a real, unified method: it runs the same process — including "quote, then order", which Etherfuse/Koywe need and Mercado Pago doesn't — no matter which provider ends up handling it, and always resolves to **one normalized shape with a QR code**, even when the rail itself has no native one (a Checkout Pro link, for instance — the QR is generated from the link URL).
+
+```ts
+const result = await cosmos.createPaymentLink({ amount: 5000, currency: "ARS", reference: "order-1" });
+
+result.provider;      // "mercadopago" | "etherfuse" | "koywe" — whichever handled it
+result.link;           // hosted checkout URL, when the rail has one
+result.qr;              // ALWAYS present — native QR payload, or one built from `link`/deposit instructions
+result.qrImage;         // ALWAYS present — ready-to-embed `data:image/png;...`
+result.synthesizedQr;   // true if `qr`/`qrImage` were generated here rather than returned by the provider
+```
+
+Auto-picks the provider the same way as everything above (sole configured one, or `{ provider: "..." }` to disambiguate). Etherfuse/Koywe need more than an amount and currency — they deliver crypto directly, so `wallet` is required, and Etherfuse additionally needs `chain` and a `bankAccountId` you've already registered (there's no safe way for a generic method to invent someone's KYC details):
+
+```ts
+// Etherfuse: quote + order run for you; the target stablebond is resolved
+// live (never hardcoded — see the Etherfuse section below).
+await cosmos.createPaymentLink({
+  provider: "etherfuse",
+  amount: 500,
+  currency: "BRL",
+  wallet: "USER_SOLANA_ADDRESS",
+  chain: "solana",
+  bankAccountId: "already-registered-account-id",
+});
+
+// Koywe: quote + createOnRampOrder run for you.
+await cosmos.createPaymentLink({
+  provider: "koywe",
+  amount: 10000,
+  currency: "ARS",
+  wallet: "USER_STELLAR_ADDRESS",
+});
+```
+
+Missing a field a given provider needs throws immediately, naming exactly what's missing — this never falls back to guessing or fabricating data.
 
 ## Features
 
