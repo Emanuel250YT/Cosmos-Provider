@@ -4,20 +4,35 @@
  *   npm run demo:ui     (or: npx tsx examples/mercadopago/demo-ui.ts)
  *   → open http://localhost:4000
  *
- * Runs fully offline against the Mercado Pago simulator: create quotes,
- * onramp links and PIX QRs, simulate the user paying (signed webhook →
- * automatic USDC release), trigger the mismatch protection, and run an
- * offramp with automatic payout. The page shows live orders and the event log.
+ * Runs against the Mercado Pago simulator: create quotes, onramp links and
+ * PIX QRs, simulate the user paying (signed webhook → automatic release),
+ * trigger the mismatch protection, and run an offramp with automatic
+ * payout. The page shows live orders and the event log.
+ *
+ * Two things are deliberately real, not simulated — see
+ * examples/mercadopago/settlement-demo.ts for the full rationale:
+ * - The rate: `CoinGeckoOracle`, no fixed/mocked number.
+ * - The release: a REAL Stellar testnet transaction for a proper asset
+ *   (code "USDC", issued by a Friendbot-funded demo issuer created on
+ *   startup) — the receiving wallet's trustline is opened and the payment
+ *   sent in the same transaction. The event log links straight to
+ *   stellar.expert for each one. Falls back to a simulated tx id
+ *   automatically if Stellar testnet/Friendbot is unreachable.
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import QRCode from "qrcode";
-import { CosmosRamp, MercadoPagoProvider, FiatCurrency } from "../../src/index";
+import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset as StellarAsset, BASE_FEE } from "@stellar/stellar-sdk";
+import { CosmosRamp, MercadoPagoProvider, CoinGeckoOracle, FiatCurrency } from "../../src/index";
 import { createMockMercadoPago } from "../helpers/mock-mercadopago";
 import { randomArsAmount, randomBrlAmount } from "../helpers/random";
 
 const PORT = 4000;
 const WEBHOOK_SECRET = "demo-mp-secret";
+
+const stellarServer = new Horizon.Server("https://horizon-testnet.stellar.org");
+const stellarExplorerTx = (hash: string) => `https://stellar.expert/explorer/testnet/tx/${hash}`;
+const isStellarTxHash = (id: string) => /^[0-9a-f]{64}$/i.test(id);
 
 const mp = createMockMercadoPago({ webhookSecret: WEBHOOK_SECRET });
 const log: string[] = [];
@@ -25,6 +40,22 @@ const note = (message: string) => {
   log.unshift(`${new Date().toLocaleTimeString()}  ${message}`);
   if (log.length > 200) log.pop();
 };
+
+console.log("Funding a Stellar testnet demo-USDC issuer (Friendbot)...");
+// Doubles as the "treasury": the account that issues an asset can send it
+// directly, with no trustline of its own — issuing IS just a payment.
+const issuer = Keypair.random();
+// Populated by demoWallet() below — settlement needs each receiving
+// wallet's own keypair to sign the trustline it opens for itself.
+const walletByAddress = new Map<string, Keypair>();
+let stellarReady = false;
+try {
+  await stellarServer.friendbot(issuer.publicKey()).call();
+  stellarReady = true;
+  console.log(`✔ Demo USDC issuer funded: ${issuer.publicKey()}`);
+} catch (error) {
+  console.warn("⚠ Could not reach Stellar testnet/Friendbot — settlement will fall back to a simulated tx id:", error);
+}
 
 const ramp = new CosmosRamp({
   providers: [
@@ -36,9 +67,41 @@ const ramp = new CosmosRamp({
       fetch: mp.fetchImpl, // ← simulator; remove to hit the real API
     }),
   ],
-  oracle: { getRate: async () => 1000 }, // ← fixed demo rate; use new CoinGeckoOracle() for real prices
+  oracle: new CoinGeckoOracle({ apiKey: process.env.COINGECKO_API_KEY }), // real market rate, not a fixed/mocked one
   settlement: async ({ wallet, amount, asset }) => {
-    note(`⛓ settlement: sent ${amount} ${asset} → ${wallet}`);
+    const receiver = wallet ? walletByAddress.get(wallet) : undefined;
+    if (stellarReady && wallet && receiver) {
+      try {
+        // Real Stellar asset (code = whatever `asset` the order actually
+        // requested — "USDC" by default), issued by the demo issuer above.
+        // The receiving wallet's trustline is opened and the payment sent
+        // in the SAME transaction: `changeTrust` sourced from the wallet,
+        // `payment` sourced from the issuer, signed by both.
+        const stellarAsset = new StellarAsset(asset, issuer.publicKey());
+        const account = await stellarServer.loadAccount(issuer.publicKey());
+        const tx = new TransactionBuilder(account, { fee: String(Number(BASE_FEE) * 2), networkPassphrase: Networks.TESTNET })
+          .addOperation(Operation.changeTrust({ asset: stellarAsset, source: wallet }))
+          .addOperation(
+            Operation.payment({
+              destination: wallet,
+              asset: stellarAsset,
+              amount: String(Math.round(amount * 1e7) / 1e7),
+            }),
+          )
+          .setTimeout(30)
+          .build();
+        tx.sign(issuer);
+        tx.sign(receiver);
+        const result = await stellarServer.submitTransaction(tx);
+        note(
+          `⛓ settlement: opened trustline + sent ${amount} ${asset} (testnet, real asset) → ${wallet} — ${stellarExplorerTx(result.hash)}`,
+        );
+        return { txId: result.hash };
+      } catch (error) {
+        note(`⚠ Stellar settlement failed, falling back to a simulated tx id: ${String(error)}`);
+      }
+    }
+    note(`⛓ settlement (simulated): sent ${amount} ${asset} → ${wallet}`);
     return { txId: `0xdemo${Date.now()}` };
   },
 });
@@ -46,7 +109,10 @@ const ramp = new CosmosRamp({
 ramp.on("order:created", (o) => note(`order created ${o.id.slice(0, 8)}… (${o.direction})`));
 ramp.on("payment:approved", (o) => note(`✔ payment approved ${o.id.slice(0, 8)}…`));
 ramp.on("payment:mismatch", (o) => note(`✘ amount mismatch on ${o.id.slice(0, 8)}… — not settling`));
-ramp.on("settlement:released", (o, r) => note(`✔ crypto released ${o.id.slice(0, 8)}… tx ${r.txId}`));
+ramp.on("settlement:released", (o, r) => {
+  const link = r.txId && isStellarTxHash(r.txId) ? ` — ${stellarExplorerTx(r.txId)}` : "";
+  note(`✔ crypto released ${o.id.slice(0, 8)}… tx ${r.txId}${link}`);
+});
 ramp.on("payout:sent", (o, p) => note(`✔ fiat payout sent for ${o.id.slice(0, 8)}… id ${p.id}`));
 ramp.on("order:completed", (o) => note(`★ order completed ${o.id.slice(0, 8)}…`));
 
@@ -55,6 +121,21 @@ ramp.on("order:completed", (o) => note(`★ order completed ${o.id.slice(0, 8)}�
 // ---------------------------------------------------------------------------
 
 type Action = (body: any) => Promise<unknown>;
+
+/** A fresh, Friendbot-funded Stellar address to receive a settlement — unless the caller already supplied one. */
+async function demoWallet(explicit?: string): Promise<string> {
+  if (explicit) return explicit;
+  const kp = Keypair.random();
+  if (stellarReady) {
+    try {
+      await stellarServer.friendbot(kp.publicKey()).call();
+      walletByAddress.set(kp.publicKey(), kp);
+    } catch {
+      // Ignore — settlement just falls back to a simulated tx id for this wallet.
+    }
+  }
+  return kp.publicKey();
+}
 
 const actions: Record<string, Action> = {
   async quote(body) {
@@ -73,7 +154,7 @@ const actions: Record<string, Action> = {
       amount: Number(body.amount ?? (currency === FiatCurrency.BRL ? randomBrlAmount() : randomArsAmount())),
       currency,
       spread: Number(body.spread ?? 0.02),
-      wallet: body.wallet ?? "USER_WALLET",
+      wallet: await demoWallet(body.wallet),
       method: body.method ?? "link",
       description: "Buy USDC (demo)",
     });
@@ -155,7 +236,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
 server.listen(PORT, () => {
   console.log(`Demo UI running → http://localhost:${PORT}`);
-  console.log("Every action runs offline against the Mercado Pago simulator.");
+  console.log("Mercado Pago is simulated; rate is real (CoinGecko) and settlement is a real Stellar testnet transaction.");
 });
 
 // ---------------------------------------------------------------------------
@@ -194,7 +275,7 @@ const PAGE = /* html */ `<!doctype html>
 <body>
 <header>
   <h1>cosmos-providers — action playground</h1>
-  <p>Offline demo: Mercado Pago simulator + fixed oracle rate (1 USDC = 1000). Click an action, watch it settle.</p>
+  <p>Mercado Pago simulator + real CoinGecko rate; settlement is a real Stellar testnet transaction (real asset + trustline). Click an action, watch it settle.</p>
 </header>
 <main>
   <section>
@@ -239,6 +320,13 @@ const PAGE = /* html */ `<!doctype html>
     refresh();
   }
 
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  }
+  function linkify(s) {
+    return escapeHtml(s).replace(/https?:\/\/\S+/g, (url) => '<a href="' + url + '" target="_blank" rel="noopener" style="color:#7ce38b">' + url + '</a>');
+  }
+
   async function refresh() {
     const { orders, log } = await (await fetch('/api/state')).json();
     document.querySelector('#orders tbody').innerHTML = orders.map(o =>
@@ -248,7 +336,7 @@ const PAGE = /* html */ `<!doctype html>
       '<td>' + o.quote.fiatAmount + ' ' + o.quote.currency + '</td>' +
       '<td>' + o.quote.cryptoAmount + ' ' + o.quote.asset + '</td></tr>'
     ).join('');
-    document.getElementById('log').innerHTML = log.map(l => '<div>' + l + '</div>').join('');
+    document.getElementById('log').innerHTML = log.map(l => '<div>' + linkify(l) + '</div>').join('');
   }
 
   refresh();
