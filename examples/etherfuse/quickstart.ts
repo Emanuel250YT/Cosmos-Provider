@@ -13,6 +13,8 @@ import "dotenv/config";
 import { generateKeyPairSync } from "node:crypto";
 import { EtherfuseClient, Chain, FiatCurrency } from "../../src/index";
 import { isMainModule } from "../helpers/isMain";
+import { randomBrlAmount } from "../helpers/random";
+import { printQr } from "../helpers/qr";
 
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 function base58Encode(bytes: Uint8Array): string {
@@ -93,11 +95,14 @@ export async function runEtherfuseQuickstart() {
       .flatMap((bond) => bond.blockchains.filter((b) => b.blockchain === Chain.Solana).map((b) => b.tokenIdentifier))[0];
     if (!targetAsset) throw new Error("No active BRL stablebond for Solana right now.");
 
-    // 5. Quote: 500 BRL → the resolved stablebond on Solana (expires in 2 minutes)
+    // 5. Quote: a random 20-100 BRL amount → the resolved stablebond on
+    // Solana (expires in 2 minutes) — random so re-running this doesn't
+    // collide with an order a previous run already left pending.
+    const sourceAmount = randomBrlAmount();
     const quote = await client.quotes.create({
       customerId: me.id,
       blockchain: Chain.Solana,
-      sourceAmount: "500",
+      sourceAmount: String(sourceAmount),
       quoteAssets: { type: "onramp", sourceAsset: FiatCurrency.BRL, targetAsset },
     });
     console.log(`Quote: ${quote.raw.sourceAmount} BRL → ${quote.destinationAmount} (asset ${targetAsset})`);
@@ -109,6 +114,7 @@ export async function runEtherfuseQuickstart() {
     const qr = receipt.createPixQr();
     if (qr) {
       console.log("Copia e cola:", qr.toString());
+      await printQr(qr.toString(), "PIX QR");
     } else if (receipt.deposit) {
       console.log("Deposit instructions:", receipt.deposit);
     }

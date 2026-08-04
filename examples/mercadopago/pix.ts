@@ -17,6 +17,8 @@
 import "dotenv/config";
 import { MercadoPagoProvider, type Charge } from "../../src/index";
 import { isMainModule } from "../helpers/isMain";
+import { randomBrlAmount, randomReference } from "../helpers/random";
+import { printQr } from "../helpers/qr";
 
 export async function createPixChargeExample(): Promise<Charge | null> {
   const accessToken = process.env.MP_BR_ACCESS_TOKEN;
@@ -32,13 +34,14 @@ export async function createPixChargeExample(): Promise<Charge | null> {
   });
 
   const charge = await mercadopago.createPixCharge({
-    amount: 50,
-    reference: `cosmos-demo-${Date.now()}`,
+    amount: randomBrlAmount(),
+    reference: randomReference(),
     description: "cosmos-providers demo — PIX",
   });
 
   console.log("PIX copia e cola:", charge.qr);
   console.log("PIX QR image (base64):", charge.qrBase64 ? "<embedded PNG>" : "n/a");
+  await printQr(charge.qr, "PIX QR");
   return charge;
 }
 

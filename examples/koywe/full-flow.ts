@@ -26,6 +26,8 @@ import "dotenv/config";
 import { Keypair, Horizon } from "@stellar/stellar-sdk";
 import { CosmosClient, KoyweError, FiatCurrency, Country, type KoyweClient } from "../../src/index";
 import { isMainModule } from "../helpers/isMain";
+import { randomArsAmount, randomReference } from "../helpers/random";
+import { printQr } from "../helpers/qr";
 
 const DEMO_EMAIL = "sandbox-demo@example.com";
 const stellarServer = new Horizon.Server("https://horizon-testnet.stellar.org");
@@ -64,7 +66,8 @@ async function runOnRamp(koywe: KoyweClient, summary: KoyweFlowSummary) {
 
   let quoteId: string;
   try {
-    const quote = await koywe.getQuote({ ramp: "onramp", fiatCurrency: FiatCurrency.ARS, amount: "10000", paymentMethodId });
+    const amount = randomArsAmount();
+    const quote = await koywe.getQuote({ ramp: "onramp", fiatCurrency: FiatCurrency.ARS, amount: String(amount), paymentMethodId });
     quoteId = quote.id;
     summary.onRampQuoteId = quote.id;
     summary.onRampDestination = `${quote.destinationAmount} ${quote.targetAsset}`;
@@ -92,7 +95,7 @@ async function runOnRamp(koywe: KoyweClient, summary: KoyweFlowSummary) {
   }
 
   try {
-    const order = await koywe.createOnRampOrder({ quoteId, stellarAddress, email: DEMO_EMAIL });
+    const order = await koywe.createOnRampOrder({ quoteId, stellarAddress, email: DEMO_EMAIL, externalId: randomReference() });
     summary.orderId = order.id;
     summary.depositCvu = order.deposit?.cvu;
     summary.depositAlias = order.deposit?.alias;
@@ -100,6 +103,7 @@ async function runOnRamp(koywe: KoyweClient, summary: KoyweFlowSummary) {
     console.log(`✔ Order created: ${order.id} (status ${order.status})`);
     if (order.deposit) console.log(`  Deposit: CVU ${order.deposit.cvu ?? "n/a"} / alias ${order.deposit.alias ?? "n/a"}`);
     if (order.interactiveUrl) console.log(`  Hosted checkout: ${order.interactiveUrl}`);
+    await printQr(order.interactiveUrl ?? order.deposit?.cvu, "Koywe deposit QR");
 
     // Status check — a SINGLE attempt, no polling: without a real transfer
     // it can't get past "WAITING", which is expected here.

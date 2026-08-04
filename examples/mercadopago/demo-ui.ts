@@ -14,6 +14,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import QRCode from "qrcode";
 import { CosmosRamp, MercadoPagoProvider, FiatCurrency } from "../../src/index";
 import { createMockMercadoPago } from "../helpers/mock-mercadopago";
+import { randomArsAmount, randomBrlAmount } from "../helpers/random";
 
 const PORT = 4000;
 const WEBHOOK_SECRET = "demo-mp-secret";
@@ -60,7 +61,7 @@ const actions: Record<string, Action> = {
     return ramp.quote({
       direction: body.direction ?? "onramp",
       currency: body.currency ?? FiatCurrency.ARS,
-      amount: Number(body.amount ?? 50_000),
+      amount: Number(body.amount ?? randomArsAmount()),
       spread: Number(body.spread ?? 0.02),
     });
   },
@@ -69,15 +70,17 @@ const actions: Record<string, Action> = {
     const currency = body.currency ?? (body.method === "qr" ? FiatCurrency.BRL : FiatCurrency.ARS);
     const order = await ramp.onramp({
       provider: "mercadopago",
-      amount: Number(body.amount ?? (currency === FiatCurrency.BRL ? 500 : 50_000)),
+      amount: Number(body.amount ?? (currency === FiatCurrency.BRL ? randomBrlAmount() : randomArsAmount())),
       currency,
       spread: Number(body.spread ?? 0.02),
       wallet: body.wallet ?? "USER_WALLET",
       method: body.method ?? "link",
       description: "Buy USDC (demo)",
     });
-    // Render the QR as an image for the page, when there is one.
-    const qrImage = order.charge?.qr ? await QRCode.toDataURL(order.charge.qr, { width: 240 }) : undefined;
+    // Render the QR as an image for the page — native PIX QR when there is
+    // one, otherwise the payment link itself so there's always something scannable.
+    const qrPayload = order.charge?.qr ?? order.charge?.link;
+    const qrImage = qrPayload ? await QRCode.toDataURL(qrPayload, { width: 240 }) : undefined;
     return { order, qrImage };
   },
 
@@ -198,9 +201,9 @@ const PAGE = /* html */ `<!doctype html>
     <h2>Actions</h2>
     <label>Order id (for pay / confirm / retry)</label>
     <input id="orderId" placeholder="click an order row to fill" />
-    <button onclick="run('quote', {direction:'onramp', currency:'ARS', amount:50000, spread:0.02})">1 · Quote 50 000 ARS → USDC (2% spread)</button>
-    <button onclick="run('onramp', {method:'link', currency:'ARS', amount:50000})">2 · Onramp — payment LINK (ARS)</button>
-    <button onclick="run('onramp', {method:'qr', currency:'BRL', amount:500})">3 · Onramp — PIX QR (BRL)</button>
+    <button onclick="run('quote', {direction:'onramp', currency:'ARS', spread:0.02})">1 · Quote random 1000-2000 ARS → USDC (2% spread)</button>
+    <button onclick="run('onramp', {method:'link', currency:'ARS'})">2 · Onramp — payment LINK (ARS)</button>
+    <button onclick="run('onramp', {method:'qr', currency:'BRL'})">3 · Onramp — PIX QR (BRL)</button>
     <button onclick="run('pay', {orderId: val()})">4 · Pay selected order (webhook → release USDC)</button>
     <button class="warn" onclick="run('pay', {orderId: val(), amount: 1})">5 · Pay WRONG amount (mismatch protection)</button>
     <button onclick="run('offramp', {cryptoAmount:100, currency:'ARS'})">6 · Offramp — 100 USDC → ARS</button>

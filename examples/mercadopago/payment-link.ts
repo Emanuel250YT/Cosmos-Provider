@@ -14,6 +14,8 @@
 import "dotenv/config";
 import { MercadoPagoProvider, FiatCurrency, type Charge } from "../../src/index";
 import { isMainModule } from "../helpers/isMain";
+import { randomArsAmount, randomBrlAmount, randomReference } from "../helpers/random";
+import { printQr } from "../helpers/qr";
 
 export async function createPaymentLinkExample(): Promise<Charge | null> {
   const arToken = process.env.MP_AR_ACCESS_TOKEN;
@@ -36,14 +38,19 @@ export async function createPaymentLinkExample(): Promise<Charge | null> {
     sandbox: true,
   });
 
+  // Random amount + reference each run — a fixed one is unrealistic for a
+  // "demo" and can collide with an order a previous run already left behind.
   const charge = await mercadopago.createPaymentLink({
-    amount: currency === FiatCurrency.ARS ? 5_000 : 50,
+    amount: currency === FiatCurrency.ARS ? randomArsAmount() : randomBrlAmount(),
     currency,
-    reference: `cosmos-demo-${Date.now()}`,
+    reference: randomReference(),
     description: "cosmos-providers demo — payment link",
   });
 
   console.log(`Payment link (${currency}):`, charge.link);
+  // Checkout Pro links have no native QR — encode the link itself so it's
+  // still scannable straight from the terminal during a live test.
+  await printQr(charge.qr ?? charge.link, "Payment link QR");
   return charge;
 }
 

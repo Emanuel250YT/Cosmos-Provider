@@ -35,6 +35,8 @@ import { createServer } from "node:http";
 import { CosmosRamp, MercadoPagoProvider, verifyCosmosSignature, FiatCurrency, type RampOrderData } from "../../src/index";
 import { createMockMercadoPago } from "../helpers/mock-mercadopago";
 import { isMainModule } from "../helpers/isMain";
+import { randomArsAmount, randomBrlAmount } from "../helpers/random";
+import { printQr } from "../helpers/qr";
 
 const WEBHOOK_SECRET = "demo-mp-secret";
 const HOOK_SECRET = "demo-cosmos-secret";
@@ -102,15 +104,16 @@ export async function runSettlementDemo(): Promise<SettlementDemoSummary> {
 
   try {
     // 1 ────────────────────────────────────────────────────────────────────
-    step("1. Quote: 5 000 ARS → USDC with a 2% spread");
-    const quote = await ramp.quote({ direction: "onramp", currency: FiatCurrency.ARS, amount: 5_000, spread: 0.02 });
+    const quoteAmount = randomArsAmount();
+    step(`1. Quote: ${quoteAmount} ARS → USDC with a 2% spread`);
+    const quote = await ramp.quote({ direction: "onramp", currency: FiatCurrency.ARS, amount: quoteAmount, spread: 0.02 });
     console.log(`   rate ${quote.rate} → effective ${quote.effectiveRate} | user gets ${quote.cryptoAmount} USDC`);
 
     // 2 ────────────────────────────────────────────────────────────────────
     step("2. Onramp via payment LINK (ARS)");
     const linkOrder = await ramp.onramp({
       provider: "mercadopago",
-      amount: 5_000,
+      amount: randomArsAmount(),
       currency: FiatCurrency.ARS,
       spread: 0.02,
       wallet: "USER_WALLET_1",
@@ -118,6 +121,7 @@ export async function runSettlementDemo(): Promise<SettlementDemoSummary> {
       description: "Buy USDC",
     });
     console.log(`   order ${linkOrder.id.slice(0, 8)}… | pay at: ${linkOrder.charge?.link}`);
+    await printQr(linkOrder.charge?.qr ?? linkOrder.charge?.link, "Payment link QR");
 
     // 3 ────────────────────────────────────────────────────────────────────
     step("3. Simulated payment → signed webhook → automatic USDC release");
@@ -134,28 +138,30 @@ export async function runSettlementDemo(): Promise<SettlementDemoSummary> {
     step("5. Onramp via PIX QR (BRL)");
     const qrOrder = await ramp.onramp({
       provider: "mercadopago",
-      amount: 50,
+      amount: randomBrlAmount(),
       currency: FiatCurrency.BRL,
       spread: 0.015,
       wallet: "USER_WALLET_2",
       method: "qr",
     });
     console.log(`   copia e cola: ${qrOrder.charge?.qr}`);
+    await printQr(qrOrder.charge?.qr, "PIX QR");
     const webhook2 = mp.pay(qrOrder.charge!.id);
     const result3 = await ramp.handleWebhook("mercadopago", webhook2);
     console.log(`   handleWebhook → ${result3.outcome}`);
 
     // 6 ────────────────────────────────────────────────────────────────────
     step("6. Amount-mismatch protection (user pays half)");
+    const mismatchAmount = randomArsAmount();
     const badOrder = await ramp.onramp({
       provider: "mercadopago",
-      amount: 1_000,
+      amount: mismatchAmount,
       currency: FiatCurrency.ARS,
       spread: 0.02,
       wallet: "USER_WALLET_3",
       method: "link",
     });
-    const badWebhook = mp.pay(badOrder.charge!.id, { amount: 500 });
+    const badWebhook = mp.pay(badOrder.charge!.id, { amount: Math.round((mismatchAmount / 2) * 100) / 100 });
     const result4 = await ramp.handleWebhook("mercadopago", badWebhook);
     console.log(`   handleWebhook → ${result4.outcome} (HTTP ${result4.status})`);
 

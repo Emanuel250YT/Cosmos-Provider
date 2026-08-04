@@ -6,6 +6,8 @@
  */
 
 import { CosmosRamp, CoinGeckoOracle, MercadoPagoProvider, FiatCurrency, Asset } from "../src/index";
+import { randomArsAmount } from "./helpers/random";
+import { printQr } from "./helpers/qr";
 
 const ramp = new CosmosRamp({
   providers: [
@@ -29,7 +31,7 @@ async function main() {
   // Build the payment: the CoinGecko rate + your spread are locked here.
   const order = await ramp.onramp({
     provider: "mercadopago",
-    amount: 5000, // ARS
+    amount: randomArsAmount(), // ARS
     currency: FiatCurrency.ARS,
     asset: Asset.USDC,
     spread: 0.02, // 2% margin
@@ -41,6 +43,7 @@ async function main() {
   console.log("Pay here:   ", order.charge?.link);
   console.log("Rate:       ", order.quote.rate, "→ effective", order.quote.effectiveRate);
   console.log("USDC to send:", order.quote.cryptoAmount);
+  await printQr(order.charge?.qr ?? order.charge?.link, "Payment link QR");
 
   // From here on, everything is automatic: when Mercado Pago notifies the
   // payment (see examples/mercadopago/webhook-server.ts), the engine verifies

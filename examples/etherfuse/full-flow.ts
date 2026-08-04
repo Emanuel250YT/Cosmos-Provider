@@ -48,6 +48,8 @@ import { keccak256 } from "js-sha3";
 import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset as StellarAsset, BASE_FEE } from "@stellar/stellar-sdk";
 import { CosmosClient, EtherfuseAPIError, Pix, Chain, FiatCurrency, Asset, type EtherfuseClient, type Quote, type OrderReceipt } from "../../src/index";
 import { isMainModule } from "../helpers/isMain";
+import { randomBrlAmount } from "../helpers/random";
+import { printQr } from "../helpers/qr";
 
 /** Currency this flow supports (Etherfuse only settles BRL/MXN today). */
 type EtherfuseFiat = typeof FiatCurrency.BRL | typeof FiatCurrency.MXN;
@@ -200,13 +202,18 @@ async function createQuoteForCurrency(
   const candidates = await resolveTargetAssetCandidates(cur, chain);
   if (!candidates.length) throw new Error(`No target-asset candidates for ${cur} on ${chain}.`);
 
+  // Random each run (well under the sandbox's own amount cap either way) so
+  // re-running this script doesn't collide with an order a previous run
+  // already left pending for the same account.
+  const sourceAmount = String(randomBrlAmount());
+
   let lastError: unknown;
   for (const candidate of candidates) {
     try {
       const quote = await client.quotes.create({
         customerId: orgId,
         blockchain: chain,
-        sourceAmount: "500",
+        sourceAmount,
         quoteAssets: { type: "onramp", sourceAsset: cur, targetAsset: candidate.asset },
       });
       return { quote, targetAsset: candidate.asset, targetSymbol: candidate.symbol };
@@ -316,7 +323,7 @@ async function runChain(orgId: string, currency: EtherfuseFiat, bankAccountId: s
     result.quoteTargetAsset = quoteResult.targetAsset;
     result.quoteTargetSymbol = quoteResult.targetSymbol;
     console.log(
-      `✔ Quote ${quoteResult.quote.id}: 500 ${currency} → ${quoteResult.quote.destinationAmount} ` +
+      `✔ Quote ${quoteResult.quote.id}: ${quoteResult.quote.raw.sourceAmount} ${currency} → ${quoteResult.quote.destinationAmount} ` +
         `${quoteResult.targetSymbol ?? ""} (rate ${quoteResult.quote.exchangeRate}, asset ${quoteResult.targetAsset})`,
     );
   } catch (error) {
@@ -357,23 +364,26 @@ async function runChain(orgId: string, currency: EtherfuseFiat, bankAccountId: s
     result.depositMethod = "pix";
     result.depositPixCode = receipt.deposit.pixCode;
     console.log(`✔ PIX code (copia e cola): ${receipt.deposit.pixCode}`);
+    await printQr(receipt.deposit.pixCode, "PIX QR");
   } else if (receipt.deposit?.method === "spei") {
     result.depositMethod = "spei";
     result.depositPixCode = receipt.deposit.clabe;
     console.log(`✔ SPEI deposit:`, receipt.deposit);
   } else if (currency === FiatCurrency.BRL) {
     // The sandbox doesn't return a BR Code for this particular order; we
-    // generate one locally with the library's PIX engine, same amount:
+    // generate one locally with the library's PIX engine, same amount as
+    // the quote actually requested.
     const demo = Pix.create({
       pixKey: "sandbox@etherfuse.com.br",
       merchantName: "Etherfuse Sandbox",
       merchantCity: "Sao Paulo",
-      amount: "500",
+      amount: quoteResult.quote.raw.sourceAmount ?? randomBrlAmount(),
       txid: receipt.orderId.replace(/-/g, "").slice(0, 25),
     });
     result.depositMethod = "pix (local demo)";
     result.depositPixCode = demo.toString();
     console.log(`ℹ Copia e cola (local demo): ${demo.toString()}`);
+    await printQr(demo.toString(), "PIX QR (local demo)");
   }
 
   // ── Simulate the fiat arriving — non-blocking on failure ────────────────
