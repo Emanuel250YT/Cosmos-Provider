@@ -132,7 +132,35 @@ describe("KoyweClient discovery", () => {
       },
     ]);
     const methods = await client(fetchImpl).getPaymentProviders("ARS");
-    expect(methods).toEqual([{ id: "p1", name: "WIREAR", label: "Bank transfer (CVU)", rail: "wirear", fee: 0 }]);
+    expect(methods).toEqual([
+      { id: "p1", name: "WIREAR", label: "Bank transfer (CVU)", rail: "wirear", fee: 0, details: undefined, deposit: undefined },
+    ]);
+  });
+
+  it("parses a WIREAR payment method's `details` into structured deposit instructions", async () => {
+    const { fetchImpl } = createMockFetch([
+      { route: "POST /rest/auth", response: { token: "app-jwt" } },
+      {
+        route: "GET /rest/payment-providers*",
+        response: [
+          {
+            _id: "p1",
+            name: "WIREAR",
+            fee: 0,
+            details: " CVU 0000053600000017871248 \n alias 30718280229.KOYWE1 \n Banco Coinag \n tef@koywe.com ",
+          },
+        ],
+      },
+    ]);
+    const [method] = await client(fetchImpl).getPaymentProviders("ARS");
+    expect(method!.details).toContain("CVU");
+    expect(method!.deposit).toEqual({
+      raw: expect.stringContaining("CVU"),
+      cvu: "0000053600000017871248",
+      alias: "30718280229.KOYWE1",
+      bankName: "Banco Coinag",
+      email: "tef@koywe.com",
+    });
   });
 });
 
@@ -184,7 +212,7 @@ describe("KoyweClient on-ramp orders", () => {
     ).rejects.toThrow(/Invalid Stellar public key/);
   });
 
-  it("parses WIREAR inline deposit instructions", async () => {
+  it("returns the order's interactiveUrl (returned for every rail, including WIREAR)", async () => {
     const { fetchImpl } = createMockFetch([
       { route: "POST /rest/auth", response: { token: "t" } },
       {
@@ -197,7 +225,7 @@ describe("KoyweClient on-ramp orders", () => {
           amountOut: 9.5,
           symbolIn: "ARS",
           symbolOut: "USDC Stellar",
-          providedAddress: " CVU 0000053600000017871248 \n alias 30718280229.KOYWE1 \n Banco Coinag \n tef@koywe.com ",
+          providedAction: "https://koywe.example/pay/o1",
         },
       },
     ]);
@@ -208,14 +236,7 @@ describe("KoyweClient on-ramp orders", () => {
       email: "alice@example.com",
     });
 
-    expect(order.deposit).toEqual({
-      raw: expect.stringContaining("CVU"),
-      cvu: "0000053600000017871248",
-      alias: "30718280229.KOYWE1",
-      bankName: "Banco Coinag",
-      email: "tef@koywe.com",
-    });
-    expect(order.interactiveUrl).toBeUndefined();
+    expect(order.interactiveUrl).toBe("https://koywe.example/pay/o1");
   });
 
   it("surfaces a hosted redirect URL for QRI/Khipu orders", async () => {
@@ -238,7 +259,6 @@ describe("KoyweClient on-ramp orders", () => {
 
     const order = await client(fetchImpl).createOnRampOrder({ quoteId: "q1", stellarAddress: STELLAR_ADDRESS });
     expect(order.interactiveUrl).toBe("https://koywe.example/pay/o2");
-    expect(order.deposit).toBeUndefined();
   });
 });
 
@@ -260,7 +280,7 @@ describe("KoyweClient off-ramp orders", () => {
           amountOut: 10500,
           symbolIn: "USDC Stellar",
           symbolOut: "ARS",
-          providedAddress: STELLAR_ADDRESS,
+          providedAction: "https://koywe.example/pay/o3",
         },
       },
     ]);
@@ -275,8 +295,27 @@ describe("KoyweClient off-ramp orders", () => {
     expect(account).toEqual({ id: "ba1", accountNumber: "123", countryCode: "AR", currencySymbol: "ARS", bankCode: undefined, bankName: "Banco X" });
 
     const order = await koywe.createOffRampOrder({ quoteId: "q2", bankAccountId: account.id, email: "bob@example.com" });
-    expect(order).toMatchObject({ id: "o3", bankAccountId: "ba1", depositAddress: STELLAR_ADDRESS });
+    expect(order).toMatchObject({ id: "o3", bankAccountId: "ba1", interactiveUrl: "https://koywe.example/pay/o3" });
     expect(requests.find((r) => r.path === "/rest/orders")!.body).toMatchObject({ destinationAddress: "ba1" });
+  });
+
+  it("fetches the deposit address for an off-ramp crypto symbol", async () => {
+    const { fetchImpl, requests } = createMockFetch([
+      { route: "POST /rest/auth", response: { token: "t" } },
+      { route: "GET /rest/client/getAddress", response: { address: STELLAR_ADDRESS } },
+    ]);
+    const address = await client(fetchImpl).getClientAddress();
+    expect(address).toBe(STELLAR_ADDRESS);
+    expect(requests[1]!.path).toBe("/rest/client/getAddress");
+    expect(requests[1]!.url).toContain("cryptoSymbol=USDC%20Stellar");
+  });
+
+  it("returns an empty string when the API omits the address", async () => {
+    const { fetchImpl } = createMockFetch([
+      { route: "POST /rest/auth", response: { token: "t" } },
+      { route: "GET /rest/client/getAddress", response: {} },
+    ]);
+    expect(await client(fetchImpl).getClientAddress("BTC")).toBe("");
   });
 
   it("submits a tx hash for reconciliation", async () => {

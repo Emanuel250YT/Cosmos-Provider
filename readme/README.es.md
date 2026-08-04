@@ -283,11 +283,14 @@ const koywe = new KoyweClient({
 
 // Onramp: ARS -> USDC en Stellar
 const providers = await koywe.getPaymentProviders("ARS"); // WIREAR (CVU), QRI-AR (QR)...
+providers[0].deposit?.cvu; // WIREAR: CVU/alias — estático por método de pago, se lee antes de crear la orden
 const quote = await koywe.getQuote({ ramp: "onramp", fiatCurrency: "ARS", amount: "10000", paymentMethodId: providers[0].id });
 const order = await koywe.createOnRampOrder({ quoteId: quote.id, stellarAddress: "DIRECCION_STELLAR_DEL_USUARIO" });
 
-order.deposit?.cvu;      // WIREAR: CVU/alias para transferir
-order.interactiveUrl;    // QRI/Khipu: link de checkout hosteado en su lugar
+order.interactiveUrl;    // URL de checkout/estado, devuelta para cualquier rail (WIREAR, QRI, Khipu...)
+
+// Offramp: el usuario envía USDC a la dirección de depósito de la cuenta:
+const depositAddress = await koywe.getClientAddress();
 ```
 
 Las direcciones de Stellar se validan localmente (`StrKey` implementado desde cero — sin depender de `@stellar/stellar-sdk`) antes de llegar a la API. Consultá órdenes con `koywe.getOrder(id)` (o `getOrderByExternalId` tras un redirect hosteado); el KYC delegado vive en `createAccount` + `checkAccount`.

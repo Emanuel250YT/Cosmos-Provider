@@ -405,17 +405,18 @@ const cosmos = new CosmosClient({
 
 // On-ramp: ARS -> USDC on Stellar
 const providers = await cosmos.koywe!.getPaymentProviders(FiatCurrency.ARS); // WIREAR (CVU), QRI-AR (QR)...
+providers[0].deposit?.cvu;   // WIREAR: CVU/alias to transfer to — static per payment method, read it before creating the order
 const quote = await cosmos.koywe!.getQuote({ ramp: "onramp", fiatCurrency: FiatCurrency.ARS, amount: "10000", paymentMethodId: providers[0].id });
 const order = await cosmos.koywe!.createOnRampOrder({ quoteId: quote.id, stellarAddress: "USER_STELLAR_ADDRESS" });
 
-order.deposit?.cvu;      // WIREAR: CVU/alias to transfer to
-order.interactiveUrl;    // QRI/Khipu: hosted checkout URL instead
+order.interactiveUrl;    // checkout/status URL, returned for every rail (WIREAR, QRI, Khipu...)
 
 // Off-ramp: USDC -> ARS to a registered bank account
 const account = await cosmos.koywe!.createBankAccount({ email, accountNumber, countryCode: Country.AR, currencySymbol: FiatCurrency.ARS });
 const offQuote = await cosmos.koywe!.getQuote({ ramp: "offramp", fiatCurrency: FiatCurrency.ARS, amount: "100" });
 const offOrder = await cosmos.koywe!.createOffRampOrder({ quoteId: offQuote.id, bankAccountId: account.id });
-// user sends USDC to offOrder.depositAddress, then:
+// user sends USDC to the client's deposit address for that symbol, then:
+const depositAddress = await cosmos.koywe!.getClientAddress();
 await cosmos.koywe!.submitTxHash(offOrder.id, stellarTxHash);
 ```
 

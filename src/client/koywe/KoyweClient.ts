@@ -9,7 +9,9 @@
  *
  * On-ramp: Argentine pesos (and CLP/MXN/COP/PEN/BRL) → USDC on Stellar via
  * WIREAR (CVU bank transfer), QRI-AR (QR) or Khipu. Off-ramp: USDC → fiat to
- * a registered bank account.
+ * a registered bank account. WIREAR/WIRECL-style CVU/alias instructions are
+ * static per payment method (not per order) — read them off
+ * {@link KoyweClient.getPaymentProviders} before creating the order.
  *
  * ```ts
  * const koywe = new KoyweClient({
@@ -59,6 +61,7 @@ import type {
   KoyweQuoteResponse,
   KoyweOrderResponse,
   KoyweErrorResponse,
+  KoyweClientAddressResponse,
 } from "./types";
 
 /** Constructor options for {@link KoyweClient}. */
@@ -174,6 +177,8 @@ export class KoyweClient {
       label: labelForProvider(p.name),
       rail: railForProvider(p.name),
       fee: p.fee,
+      details: p.details,
+      deposit: parseDepositInstructions(p.details),
     }));
   }
 
@@ -227,8 +232,10 @@ export class KoyweClient {
   /**
    * Create an on-ramp order (fiat → USDC on Stellar) from an executable quote.
    *
-   * For WIREAR the response carries inline CVU/alias/bank instructions; for
-   * QRI / Khipu it carries a hosted redirect URL the user must open to pay.
+   * Every order gets an {@link KoyweOnRampOrder.interactiveUrl}. For WIREAR
+   * the deposit instructions (CVU/alias) are static per payment method — read
+   * them off {@link KoyweClient.getPaymentProviders} before calling this,
+   * rather than expecting them back on the order.
    */
   async createOnRampOrder(args: CreateOnRampOrderArgs): Promise<KoyweOnRampOrder> {
     if (!args.stellarAddress) {
@@ -270,7 +277,6 @@ export class KoyweClient {
       sourceAsset: displayAsset(response.symbolIn),
       targetAsset: displayAsset(response.symbolOut),
       stellarAddress: args.stellarAddress,
-      deposit: parseDepositInstructions(response.providedAddress),
       interactiveUrl: response.providedAction,
     };
   }
@@ -328,8 +334,9 @@ export class KoyweClient {
 
   /**
    * Create an off-ramp order (USDC on Stellar → fiat) from an executable
-   * quote. The user then sends USDC to {@link KoyweOffRampOrder.depositAddress}
-   * and submits the resulting tx hash via {@link submitTxHash}.
+   * quote. Call {@link getClientAddress} to learn where to send the USDC —
+   * it's a deposit address per crypto symbol, not part of the order — then
+   * submit the resulting tx hash via {@link submitTxHash}.
    */
   async createOffRampOrder(args: CreateOffRampOrderArgs): Promise<KoyweOffRampOrder> {
     const email = args.email ?? this.#config.email;
@@ -354,7 +361,6 @@ export class KoyweClient {
       sourceAsset: displayAsset(response.symbolIn),
       targetAsset: displayAsset(response.symbolOut),
       bankAccountId: args.bankAccountId,
-      depositAddress: response.providedAddress,
       interactiveUrl: response.providedAction,
     };
   }
@@ -371,6 +377,22 @@ export class KoyweClient {
       { txHash },
       email ?? this.#config.email,
     );
+  }
+
+  /**
+   * Fetch the deposit address for a crypto symbol
+   * (`GET /rest/client/getAddress?cryptoSymbol=`) — where off-ramp USDC
+   * transfers must be sent. Defaults to `"USDC Stellar"`, this client's only
+   * supported symbol.
+   */
+  async getClientAddress(cryptoSymbol: string = USDC_STELLAR_SYMBOL, email?: string): Promise<string> {
+    const response = await this.#request<KoyweClientAddressResponse>(
+      "GET",
+      `/rest/client/getAddress?cryptoSymbol=${encodeURIComponent(cryptoSymbol)}`,
+      undefined,
+      email ?? this.#config.email,
+    );
+    return response.address ?? "";
   }
 
   // ---------------------------------------------------------------------------
@@ -406,8 +428,6 @@ export class KoyweClient {
         destinationAmount: String(response.amountOut),
         sourceAsset: displayAsset(response.symbolIn),
         targetAsset: displayAsset(response.symbolOut),
-        deposit: parseDepositInstructions(response.providedAddress),
-        depositAddress: response.providedAddress,
         interactiveUrl: response.providedAction,
         dates: response.dates,
         txHash: response.txHash,
@@ -669,19 +689,21 @@ function railForProvider(name: string): KoyweRail | undefined {
 }
 
 /**
- * Parse a WIREAR `providedAddress` multi-line string into structured deposit
- * fields, e.g.:
+ * Best-effort parse of a payment method's `details` multi-line string (from
+ * `GET /rest/payment-providers`) into structured deposit fields, e.g.:
  *
  *   ` CVU 0000053600000017871248 \n alias 30718280229.KOYWE1 \n Banco Coinag \n tef@koywe.com `
  *
- * Returns `undefined` when there is no inline instruction string (QRI/Khipu
- * orders use `interactiveUrl` instead).
+ * `details` is free text and its shape isn't guaranteed across countries —
+ * {@link KoyweDepositInstructions.raw} always preserves the original string.
+ * Returns `undefined` when the provider has no `details` (hosted-redirect
+ * rails like QRI/Khipu use `interactiveUrl` on the order instead).
  */
-function parseDepositInstructions(providedAddress: string | undefined): KoyweDepositInstructions | undefined {
-  if (!providedAddress || !providedAddress.trim()) return undefined;
+function parseDepositInstructions(details: string | undefined): KoyweDepositInstructions | undefined {
+  if (!details || !details.trim()) return undefined;
 
-  const result: KoyweDepositInstructions = { raw: providedAddress.trim() };
-  const lines = providedAddress
+  const result: KoyweDepositInstructions = { raw: details.trim() };
+  const lines = details
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);

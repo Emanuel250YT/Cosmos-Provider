@@ -529,16 +529,10 @@ async function createPaymentLinkViaKoywe(koywe: KoyweClient, request: UnifiedPay
     externalId: request.reference,
   });
 
-  const depositText = order.deposit
-    ? [order.deposit.cvu && `CVU: ${order.deposit.cvu}`, order.deposit.alias && `alias: ${order.deposit.alias}`]
-        .filter(Boolean)
-        .join(" / ")
-    : undefined;
-
-  const { qr, qrImage, synthesizedQr } = await buildQrResult([
-    { payload: order.interactiveUrl },
-    { payload: depositText },
-  ]);
+  // Koywe returns `interactiveUrl` for every order regardless of rail — for
+  // WIREAR-style bank transfers, the CVU/alias to pay is static per payment
+  // method, not per order (see `koywe.getPaymentProviders(...)[i].deposit`).
+  const { qr, qrImage, synthesizedQr } = await buildQrResult([{ payload: order.interactiveUrl }]);
 
   return {
     provider: "koywe",

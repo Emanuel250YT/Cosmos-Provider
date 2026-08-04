@@ -50,6 +50,14 @@ export interface KoywePaymentMethod {
   label: string;
   rail?: KoyweRail;
   fee?: number;
+  /**
+   * Static deposit instructions for bank-transfer rails (WIREAR, WIRECL...),
+   * best-effort parsed from {@link details}. These are per payment method,
+   * not per order — Koywe's own bank/CVU doesn't change between orders.
+   */
+  deposit?: KoyweDepositInstructions;
+  /** Raw wire-transfer instructions from Koywe (bank name, account, email...), unparsed. */
+  details?: string;
 }
 
 export interface KoyweQuote {
@@ -83,9 +91,12 @@ export interface KoyweOnRampOrder {
   sourceAsset: string;
   targetAsset: string;
   stellarAddress: string;
-  /** Inline deposit instructions (WIREAR). Absent for hosted-redirect rails. */
-  deposit?: KoyweDepositInstructions;
-  /** Hosted checkout URL to redirect the user to (QRI, Khipu). */
+  /**
+   * Checkout/status URL Koywe returns for every order, regardless of rail —
+   * for WIREAR-style bank transfers, get the CVU/alias to pay from
+   * {@link KoyweClient.getPaymentProviders}'s {@link KoywePaymentMethod.deposit}
+   * instead (it's static per payment method, not per order).
+   */
   interactiveUrl?: string;
 }
 
@@ -98,8 +109,6 @@ export interface KoyweOffRampOrder {
   sourceAsset: string;
   targetAsset: string;
   bankAccountId: string;
-  /** Stellar address the user must send USDC to. */
-  depositAddress?: string;
   interactiveUrl?: string;
 }
 
@@ -110,8 +119,6 @@ export interface KoyweOrder {
   destinationAmount: string;
   sourceAsset: string;
   targetAsset: string;
-  deposit?: KoyweDepositInstructions;
-  depositAddress?: string;
   interactiveUrl?: string;
   dates?: Record<string, string | undefined>;
   txHash?: string;
@@ -207,6 +214,9 @@ export interface KoywePaymentProvider {
   _id: string;
   name: string;
   fee?: number;
+  description?: string;
+  /** Raw wire-transfer instructions (bank name, account number, email...), free-text per provider. */
+  details?: string;
 }
 
 export interface KoyweQuoteResponse {
@@ -230,11 +240,15 @@ export interface KoyweOrderResponse {
   amountOut: number;
   symbolIn: string;
   symbolOut: string;
-  providedAddress?: string;
   providedAction?: string;
   dates?: Record<string, string | undefined>;
   txHash?: string;
   statusDetails?: unknown;
+}
+
+/** Raw response of `GET /client/getAddress`. */
+export interface KoyweClientAddressResponse {
+  address?: string;
 }
 
 export interface KoyweBankAccountRequest {

@@ -6,7 +6,9 @@
  * and delegated KYC.
  *
  * Setup: `KOYWE_CLIENT_ID` / `KOYWE_SECRET` in `.env` (sandbox:
- * https://api-sandbox.koywe.com, request them at https://docs-crypto.koywe.com).
+ * https://api-sandbox.koywe.com). No self-service signup — email
+ * hola@koywe.com or book a call to get them (see
+ * https://docs-crypto.koywe.com/documentation/credentials).
  * Run `npm run flow:koywe`. Without credentials, the script warns and exits
  * — there's nothing else to show without them.
  *
@@ -48,6 +50,8 @@ export interface KoyweFlowSummary {
   bankAccountError?: string;
   offRampQuoteId?: string;
   offRampError?: string;
+  offRampDepositAddress?: string;
+  offRampAddressError?: string;
   kycStatus?: string;
   kycError?: string;
 }
@@ -59,7 +63,13 @@ async function runOnRamp(koywe: KoyweClient, summary: KoyweFlowSummary) {
     const providers = await koywe.getPaymentProviders(FiatCurrency.ARS);
     summary.paymentProviders = providers.map((p) => `${p.label} (${p.id})`);
     console.log(`✔ Available rails for ARS: ${providers.map((p) => p.label).join(", ") || "none"}`);
-    paymentMethodId = providers[0]?.id;
+    const chosen = providers[0];
+    paymentMethodId = chosen?.id;
+    // CVU/alias (WIREAR) are static per payment method, not per order —
+    // read them here, before creating the order.
+    summary.depositCvu = chosen?.deposit?.cvu;
+    summary.depositAlias = chosen?.deposit?.alias;
+    if (chosen?.deposit) console.log(`  Deposit: CVU ${chosen.deposit.cvu ?? "n/a"} / alias ${chosen.deposit.alias ?? "n/a"}`);
   } catch (error) {
     console.error("✘ Could not list payment providers — continuing without a specific one:", error);
   }
@@ -97,13 +107,10 @@ async function runOnRamp(koywe: KoyweClient, summary: KoyweFlowSummary) {
   try {
     const order = await koywe.createOnRampOrder({ quoteId, stellarAddress, email: DEMO_EMAIL, externalId: randomReference() });
     summary.orderId = order.id;
-    summary.depositCvu = order.deposit?.cvu;
-    summary.depositAlias = order.deposit?.alias;
     summary.interactiveUrl = order.interactiveUrl;
     console.log(`✔ Order created: ${order.id} (status ${order.status})`);
-    if (order.deposit) console.log(`  Deposit: CVU ${order.deposit.cvu ?? "n/a"} / alias ${order.deposit.alias ?? "n/a"}`);
     if (order.interactiveUrl) console.log(`  Hosted checkout: ${order.interactiveUrl}`);
-    await printQr(order.interactiveUrl ?? order.deposit?.cvu, "Koywe deposit QR");
+    await printQr(order.interactiveUrl ?? summary.depositCvu, "Koywe deposit QR");
 
     // Status check — a SINGLE attempt, no polling: without a real transfer
     // it can't get past "WAITING", which is expected here.
@@ -148,6 +155,17 @@ async function runOffRamp(koywe: KoyweClient, summary: KoyweFlowSummary) {
     summary.offRampError = String(error instanceof Error ? error.message : error);
     console.error("✘ Could not get an off-ramp quote:", error);
   }
+
+  // Where the user must send USDC for an off-ramp order — a deposit address
+  // per crypto symbol, not something returned on the order itself.
+  try {
+    const address = await koywe.getClientAddress();
+    summary.offRampDepositAddress = address || undefined;
+    console.log(`✔ Off-ramp deposit address (USDC Stellar): ${address || "n/a"}`);
+  } catch (error) {
+    summary.offRampAddressError = String(error instanceof Error ? error.message : error);
+    console.error("✘ Could not fetch the off-ramp deposit address:", error);
+  }
 }
 
 async function runKyc(koywe: KoyweClient, summary: KoyweFlowSummary) {
@@ -173,7 +191,8 @@ export async function runKoyweFlow(): Promise<KoyweFlowSummary | null> {
   const SECRET = process.env.KOYWE_SECRET;
   if (!CLIENT_ID || !SECRET) {
     console.error(
-      "⚠ Missing KOYWE_CLIENT_ID / KOYWE_SECRET (set them in .env, get them from https://docs-crypto.koywe.com) — skipping the Koywe flow.",
+      "⚠ Missing KOYWE_CLIENT_ID / KOYWE_SECRET (set them in .env — there's no self-service signup, email hola@koywe.com or " +
+        "book a call, see https://docs-crypto.koywe.com/documentation/credentials) — skipping the Koywe flow.",
     );
     return null;
   }
@@ -228,6 +247,10 @@ export function printKoyweSummary(summary: KoyweFlowSummary) {
   console.log(
     "Off-ramp quote:        ",
     summary.offRampQuoteId ?? `n/a${summary.offRampError ? ` — error: ${summary.offRampError}` : ""}`,
+  );
+  console.log(
+    "Off-ramp deposit addr: ",
+    summary.offRampDepositAddress ?? `n/a${summary.offRampAddressError ? ` — error: ${summary.offRampAddressError}` : ""}`,
   );
   console.log("KYC:                   ", summary.kycStatus ?? `n/a${summary.kycError ? ` — error: ${summary.kycError}` : ""}`);
   console.log("═════════════════════════════════════════════════════════");
