@@ -1,13 +1,19 @@
 /**
- * Local demo: a minimal "Buy USDC" checkout — pick a payment method, pay,
- * done. No dashboard, no action list, no raw JSON: the whole page is built
- * from `cosmos-providers/react`'s actual components (`ReceivePayment`,
+ * Local demo: a minimal "Buy USDC" checkout — pick a provider, a payment
+ * method and a test amount, pay, done. No dashboard, no action list, no raw
+ * JSON: the whole page is built from `cosmos-providers/react`'s actual
+ * components (`PaymentMethodCard`, `PaymentOptionRow`, `ReceivePayment`,
  * `PaymentConfirmation`), server-rendered with `react-dom/server` and fed by
  * the `cosmos-providers/react/server` mappers (`chargeToQrProps`,
  * `rampOrderToDetailRows`) — the same pieces a real integration would use.
+ * Transitions between steps fade/slide instead of hard-swapping.
  *
  *   npm run demo:ui     (or: npx tsx examples/mercadopago/demo-ui.tsx)
  *   → open http://localhost:4000
+ *
+ * The provider list comes from `ramp.providers` (whatever's actually
+ * registered below) — add another `PaymentProvider` to the `CosmosRamp`
+ * constructor and it shows up in the picker with no other change.
  *
  * Two things are deliberately real, not simulated — see
  * examples/mercadopago/settlement-demo.ts for the full rationale:
@@ -23,13 +29,21 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { renderToStaticMarkup } from "react-dom/server";
 import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset as StellarAsset, BASE_FEE } from "@stellar/stellar-sdk";
 import { CosmosRamp, MercadoPagoProvider, CoinGeckoOracle, FiatCurrency, type RampOrderData } from "../../src/index";
-import { ReceivePayment, PaymentConfirmation } from "../../src/react";
+import { ReceivePayment, PaymentConfirmation, PaymentMethodCard, PaymentOptionRow } from "../../src/react";
 import { chargeToQrProps, rampOrderToDetailRows } from "../../src/react/server";
 import { createMockMercadoPago } from "../helpers/mock-mercadopago";
-import { randomArsAmount, randomBrlAmount } from "../helpers/random";
+import { randomAmount } from "../helpers/random";
 
 const PORT = 4000;
 const WEBHOOK_SECRET = "demo-mp-secret";
+
+/** Test-amount bounds for this demo, per method's currency (BRL for PIX QR, ARS for the link). */
+const BRL_TEST_RANGE = [5, 30] as const;
+const ARS_TEST_RANGE = [1500, 5000] as const;
+
+const clamp = (n: number, min: number, max: number): number => Math.min(max, Math.max(min, n));
+const providerLabel = (name: string): string => name.charAt(0).toUpperCase() + name.slice(1).replace(/[-_]/g, " ");
+const initials = (name: string): string => name.slice(0, 2).toUpperCase();
 
 const stellarServer = new Horizon.Server("https://horizon-testnet.stellar.org");
 const mp = createMockMercadoPago({ webhookSecret: WEBHOOK_SECRET });
@@ -111,7 +125,65 @@ async function demoWallet(): Promise<string> {
   return kp.publicKey();
 }
 
-/** The pending-payment view a buyer sees: real QR or payment link, built with cosmos-providers/react. */
+// ---------------------------------------------------------------------------
+// Views — all built from cosmos-providers/react's actual components.
+// ---------------------------------------------------------------------------
+
+type Method = "qr" | "link";
+
+/**
+ * Step 1: provider + method + test-amount picker. Lists every provider
+ * registered on `ramp` (via `PaymentMethodCard`) and the two payment methods
+ * (via `PaymentOptionRow`) — real components, wrapped in a plain clickable
+ * `<div>` since a statically-rendered page can't wire up React's `onClick`.
+ */
+function renderPicker(providerName: string, method: Method, amount?: number): string {
+  const providers = ramp.providers;
+  const selected = providers.find((p) => p.name === providerName) ?? providers[0]!;
+  const currency = method === "qr" ? FiatCurrency.BRL : FiatCurrency.ARS;
+  const range = method === "qr" ? BRL_TEST_RANGE : ARS_TEST_RANGE;
+  const value = clamp(amount ?? randomAmount(range[0], range[1]), range[0], range[1]);
+
+  const providerRows = providers
+    .map((p) => {
+      const card = renderToStaticMarkup(
+        <PaymentMethodCard
+          iconLabel={initials(p.name)}
+          iconBg="#111827"
+          title={providerLabel(p.name)}
+          subtitle={p.currencies.length ? p.currencies.join(" · ") : p.regions.join(" · ")}
+          selected={p.name === selected.name}
+          radioColor={p.name === selected.name ? "#111827" : "#D1D5DB"}
+        />,
+      );
+      return `<div class="pickable" onclick="selectPicker('${p.name}','${method}')">${card}</div>`;
+    })
+    .join("");
+
+  const methodRows = (["qr", "link"] as const)
+    .map((m) => {
+      const row = renderToStaticMarkup(
+        <PaymentOptionRow label={m === "qr" ? "PIX QR" : "Payment link"} selected={m === method} radioColor={m === method ? "#4F46E5" : "#D1D5DB"} />,
+      );
+      return `<div class="pickable" onclick="selectPicker('${selected.name}','${m}')">${row}</div>`;
+    })
+    .join("");
+
+  return `<div style="width:100%;max-width:420px;box-sizing:border-box;margin:0 auto;background:#fff;border-radius:24px;padding:24px;font-family:Helvetica, Arial, sans-serif;color:#111827">
+    <h1 style="font-size:20px;margin:0 0 4px;text-align:center">Buy USDC</h1>
+    <p style="color:#6B7280;margin:0 0 20px;font-size:13px;text-align:center">Choose a provider and how you'd like to pay.</p>
+    <div style="font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Provider (${providers.length} loaded)</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">${providerRows}</div>
+    <div style="font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Method</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">${methodRows}</div>
+    <label style="display:block;font-size:12px;color:#6B7280;font-weight:600;margin-bottom:6px">Test amount (${currency}, ${range[0]}–${range[1]})</label>
+    <input id="amount" type="number" min="${range[0]}" max="${range[1]}" step="0.01" value="${value}"
+      style="width:100%;box-sizing:border-box;border:1px solid #E5E7EB;border-radius:10px;padding:12px 14px;font-size:14px;margin-bottom:20px" />
+    <button onclick="pay()" style="width:100%;background:#111827;color:#fff;border:none;border-radius:16px;padding:16px;font-size:16px;font-weight:700;cursor:pointer">Continue</button>
+  </div>`;
+}
+
+/** Step 2: the real QR/payment-link view a buyer would see. */
 async function renderPending(order: RampOrderData): Promise<string> {
   const qr = await chargeToQrProps(order.charge, { width: 240 });
   return renderToStaticMarkup(
@@ -126,7 +198,7 @@ async function renderPending(order: RampOrderData): Promise<string> {
   );
 }
 
-/** The receipt shown once the order is paid and settled. */
+/** Step 3: the receipt shown once the order is paid and settled. */
 function renderReceipt(order: RampOrderData): string {
   return renderToStaticMarkup(
     <PaymentConfirmation
@@ -138,19 +210,24 @@ function renderReceipt(order: RampOrderData): string {
 }
 
 // ---------------------------------------------------------------------------
-// API: two actions — start a checkout, confirm the payment.
+// API
 // ---------------------------------------------------------------------------
 
 type Action = (body: any) => Promise<unknown>;
 
 const actions: Record<string, Action> = {
-  /** Creates the onramp charge for the chosen method and returns the pending-payment view. */
+  /** Creates the onramp charge for the chosen provider/method/amount and returns the pending-payment view. */
   async checkout(body) {
-    const method: "qr" | "link" = body.method === "qr" ? "qr" : "link";
+    const providerName = ramp.providers.some((p) => p.name === body.provider) ? body.provider : ramp.providers[0]!.name;
+    const method: Method = body.method === "link" ? "link" : "qr";
     const currency = method === "qr" ? FiatCurrency.BRL : FiatCurrency.ARS;
+    const range = method === "qr" ? BRL_TEST_RANGE : ARS_TEST_RANGE;
+    const requested = Number(body.amount);
+    const amount = Number.isFinite(requested) ? clamp(requested, range[0], range[1]) : randomAmount(range[0], range[1]);
+
     const order = await ramp.onramp({
-      provider: "mercadopago",
-      amount: currency === FiatCurrency.BRL ? randomBrlAmount() : randomArsAmount(),
+      provider: providerName,
+      amount,
       currency,
       spread: 0.02,
       wallet: await demoWallet(),
@@ -182,6 +259,14 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(PAGE);
     return;
   }
+  if (req.method === "GET" && url.pathname === "/api/picker") {
+    const provider = url.searchParams.get("provider") || ramp.providers[0]!.name;
+    const method: Method = url.searchParams.get("method") === "link" ? "link" : "qr";
+    const amountParam = url.searchParams.get("amount");
+    const amount = amountParam ? Number(amountParam) : undefined;
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ html: renderPicker(provider, method, amount) }));
+    return;
+  }
   if (req.method === "POST" && url.pathname.startsWith("/api/")) {
     const name = url.pathname.slice("/api/".length);
     const action = actions[name];
@@ -206,6 +291,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
 server.listen(PORT, () => {
   console.log(`Demo UI running → http://localhost:${PORT}`);
+  console.log(`Providers loaded: ${ramp.providers.map((p) => p.name).join(", ")}`);
   console.log("Mercado Pago is simulated; rate is real (CoinGecko) and settlement is a real Stellar testnet transaction.");
 });
 
@@ -227,18 +313,8 @@ const PAGE = /* html */ `<!doctype html>
     min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
   }
   main { width: 100%; max-width: 420px; }
-  .picker { background: #fff; border-radius: 24px; padding: 24px; text-align: center; }
-  .picker h1 { font-size: 20px; margin: 0 0 4px; }
-  .picker p { color: #6B7280; margin: 0 0 20px; font-size: 13px; }
-  .methods { display: flex; flex-direction: column; gap: 10px; }
-  .methods button {
-    display: block; width: 100%; padding: 16px; border-radius: 16px; border: none;
-    font-size: 15px; font-weight: 700; cursor: pointer; font: inherit;
-  }
-  .methods button.primary { background: #111827; color: #fff; }
-  .methods button.secondary { background: #F3F4F6; color: #111827; }
-  .methods button:disabled { opacity: .6; cursor: default; }
-  #confirmBar { margin-top: 12px; }
+  .pickable { cursor: pointer; }
+  .pickable:hover { filter: brightness(0.98); }
   #confirmBar button {
     display: block; width: 100%; padding: 14px; border-radius: 16px; border: none;
     background: #16A34A; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; font: inherit;
@@ -249,47 +325,64 @@ const PAGE = /* html */ `<!doctype html>
     color: #6B7280; font-size: 13px; text-decoration: underline; cursor: pointer; font: inherit;
   }
   #hint { text-align: center; color: #9CA3AF; font-size: 12px; margin-top: 16px; }
+
+  /* Animated transitions between steps (picker → pending payment → receipt). */
+  @keyframes viewEnter { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+  @keyframes viewLeave { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-8px) scale(.98); } }
+  #view > *, #actions > * { animation: viewEnter .3s cubic-bezier(.16,1,.3,1) both; }
+  #view > *.leaving, #actions > *.leaving { animation: viewLeave .15s ease both !important; }
 </style>
 </head>
 <body>
 <main>
-  <div id="view">
-    <div class="picker">
-      <h1>Buy USDC</h1>
-      <p>Pick how you'd like to pay.</p>
-      <div class="methods">
-        <button class="primary" id="qrBtn" onclick="checkout('qr')">Pay with PIX QR</button>
-        <button class="secondary" id="linkBtn" onclick="checkout('link')">Pay with a link</button>
-      </div>
-    </div>
-  </div>
+  <div id="view">${renderPicker(ramp.providers[0]!.name, "qr")}</div>
   <div id="actions"></div>
   <p id="hint">Mercado Pago is simulated; the release is a real Stellar testnet transaction.</p>
 </main>
 <script>
+  let selectedProvider = ${JSON.stringify(ramp.providers[0]!.name)};
+  let selectedMethod = 'qr';
   let orderId = null;
 
-  function setLoading(loading) {
-    var qrBtn = document.getElementById('qrBtn');
-    var linkBtn = document.getElementById('linkBtn');
-    if (qrBtn) qrBtn.disabled = loading;
-    if (linkBtn) linkBtn.disabled = loading;
+  /** Fades the current child of #containerId out, swaps its HTML, then fades the new one in (CSS handles the "in" animation automatically). */
+  function swapView(containerId, html) {
+    const el = document.getElementById(containerId);
+    const current = el.firstElementChild;
+    if (current) {
+      current.classList.add('leaving');
+      setTimeout(function () { el.innerHTML = html; }, 150);
+    } else {
+      el.innerHTML = html;
+    }
   }
 
-  async function checkout(method) {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/checkout', { method: 'POST', body: JSON.stringify({ method: method }) });
-      const data = await res.json();
-      if (data.error) { alert(data.error); return; }
-      orderId = data.orderId;
-      document.getElementById('view').innerHTML = data.resultHtml;
-      document.getElementById('actions').innerHTML =
-        '<div id="confirmBar"><button onclick="confirmPayment()">I\\'ve paid</button></div>' +
-        '<button id="restart" onclick="location.reload()">Start over</button>';
-    } finally {
-      setLoading(false);
+  async function selectPicker(provider, method) {
+    const amountInput = document.getElementById('amount');
+    const keepAmount = amountInput && selectedMethod === method ? amountInput.value : '';
+    selectedProvider = provider;
+    selectedMethod = method;
+    const qs = new URLSearchParams({ provider: provider, method: method });
+    if (keepAmount) qs.set('amount', keepAmount);
+    const res = await fetch('/api/picker?' + qs.toString());
+    const data = await res.json();
+    swapView('view', data.html);
+  }
+
+  async function pay() {
+    const amountInput = document.getElementById('amount');
+    const amount = amountInput ? Number(amountInput.value) : undefined;
+    const btn = document.querySelector('#view button');
+    if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+    const res = await fetch('/api/checkout', { method: 'POST', body: JSON.stringify({ provider: selectedProvider, method: selectedMethod, amount: amount }) });
+    const data = await res.json();
+    if (data.error) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Continue'; }
+      alert(data.error);
+      return;
     }
+    orderId = data.orderId;
+    swapView('view', data.resultHtml);
+    swapView('actions', '<div id="confirmBar"><button onclick="confirmPayment()">I\\'ve paid</button></div><button id="restart" onclick="location.reload()">Start over</button>');
   }
 
   async function confirmPayment() {
@@ -305,8 +398,8 @@ const PAGE = /* html */ `<!doctype html>
       alert(data.error);
       return;
     }
-    document.getElementById('view').innerHTML = data.resultHtml;
-    document.getElementById('actions').innerHTML = '<button id="restart" onclick="location.reload()">Start over</button>';
+    swapView('view', data.resultHtml);
+    swapView('actions', '<button id="restart" onclick="location.reload()">Start over</button>');
   }
 </script>
 </body>
