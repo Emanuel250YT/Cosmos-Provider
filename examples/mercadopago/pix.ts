@@ -12,6 +12,7 @@
  *
  * Run:  npx tsx examples/mercadopago/pix.ts
  * Env:  MP_BR_ACCESS_TOKEN in .env
+ *       MP_BR_WEBHOOK_SECRET (optional, verifies the x-signature header)
  */
 
 import "dotenv/config";
@@ -29,6 +30,7 @@ export async function createPixChargeExample(): Promise<Charge | null> {
 
   const mercadopago = new MercadoPagoProvider({
     accessToken,
+    webhookSecret: process.env.MP_BR_WEBHOOK_SECRET,
     sandbox: false, // PIX only works with a real, production BRL account
     defaultPayerEmail: "buyer@example.com",
   });

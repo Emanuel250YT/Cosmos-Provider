@@ -7,16 +7,29 @@
  * order, and releases the crypto through your settlement.
  *
  * Run with: npx tsx examples/mercadopago/webhook-server.ts
+ * Env vars: MP_AR_ACCESS_TOKEN and/or MP_BR_ACCESS_TOKEN in .env
+ *           MP_AR_WEBHOOK_SECRET / MP_BR_WEBHOOK_SECRET (optional, verifies the x-signature header)
  */
 
 import { createServer } from "node:http";
-import { CosmosRamp, CoinGeckoOracle, MercadoPagoProvider } from "../../src/index";
+import { CosmosRamp, CoinGeckoOracle, MercadoPagoProvider, FiatCurrency } from "../../src/index";
 
 const ramp = new CosmosRamp({
   providers: [
     new MercadoPagoProvider({
-      accessToken: process.env.MP_ACCESS_TOKEN!,
-      webhookSecret: process.env.MP_WEBHOOK_SECRET,
+      // Multi-account: a notification's currency picks which account
+      // verifies/handles it, so this one server can receive both AR and BR
+      // payments — see README, "Mercado Pago multi-account".
+      accounts: {
+        [FiatCurrency.ARS]: {
+          accessToken: process.env.MP_AR_ACCESS_TOKEN!,
+          webhookSecret: process.env.MP_AR_WEBHOOK_SECRET,
+        },
+        [FiatCurrency.BRL]: {
+          accessToken: process.env.MP_BR_ACCESS_TOKEN!,
+          webhookSecret: process.env.MP_BR_WEBHOOK_SECRET,
+        },
+      },
       // Set this explicitly for your deployment — never inferred from the
       // token's format. See README, "Sandbox vs. production".
       sandbox: false,

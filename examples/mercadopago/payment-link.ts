@@ -9,6 +9,7 @@
  *
  * Run:  npx tsx examples/mercadopago/payment-link.ts
  * Env:  MP_AR_ACCESS_TOKEN and/or MP_BR_ACCESS_TOKEN in .env
+ *       MP_AR_WEBHOOK_SECRET / MP_BR_WEBHOOK_SECRET (optional, verifies the x-signature header)
  */
 
 import "dotenv/config";
@@ -26,9 +27,11 @@ export async function createPaymentLinkExample(): Promise<Charge | null> {
     return null;
   }
   const currency = arToken ? FiatCurrency.ARS : FiatCurrency.BRL;
+  const webhookSecret = arToken ? process.env.MP_AR_WEBHOOK_SECRET : process.env.MP_BR_WEBHOOK_SECRET;
 
   const mercadopago = new MercadoPagoProvider({
     accessToken,
+    webhookSecret,
     // Hardcoded on purpose: this is a test script, and the token's prefix
     // alone can't tell sandbox and production apart (Mercado Pago issues
     // "APP_USR-..." for both real accounts and "usuario de prueba" test
