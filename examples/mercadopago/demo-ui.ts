@@ -12,7 +12,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import QRCode from "qrcode";
-import { CosmosRamp, MercadoPagoProvider } from "../../src/index";
+import { CosmosRamp, MercadoPagoProvider, FiatCurrency } from "../../src/index";
 import { createMockMercadoPago } from "../helpers/mock-mercadopago";
 
 const PORT = 4000;
@@ -59,17 +59,17 @@ const actions: Record<string, Action> = {
   async quote(body) {
     return ramp.quote({
       direction: body.direction ?? "onramp",
-      currency: body.currency ?? "ARS",
+      currency: body.currency ?? FiatCurrency.ARS,
       amount: Number(body.amount ?? 50_000),
       spread: Number(body.spread ?? 0.02),
     });
   },
 
   async onramp(body) {
-    const currency = body.currency ?? (body.method === "qr" ? "BRL" : "ARS");
+    const currency = body.currency ?? (body.method === "qr" ? FiatCurrency.BRL : FiatCurrency.ARS);
     const order = await ramp.onramp({
       provider: "mercadopago",
-      amount: Number(body.amount ?? (currency === "BRL" ? 500 : 50_000)),
+      amount: Number(body.amount ?? (currency === FiatCurrency.BRL ? 500 : 50_000)),
       currency,
       spread: Number(body.spread ?? 0.02),
       wallet: body.wallet ?? "USER_WALLET",
@@ -95,7 +95,7 @@ const actions: Record<string, Action> = {
     return ramp.offramp({
       provider: "mercadopago",
       cryptoAmount: Number(body.cryptoAmount ?? 100),
-      currency: body.currency ?? "ARS",
+      currency: body.currency ?? FiatCurrency.ARS,
       spread: Number(body.spread ?? 0.02),
       destination: { email: "user@example.com" },
     });

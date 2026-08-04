@@ -24,7 +24,7 @@
 
 import "dotenv/config";
 import { Keypair, Horizon } from "@stellar/stellar-sdk";
-import { CosmosClient, KoyweError, type KoyweClient } from "../../src/index";
+import { CosmosClient, KoyweError, FiatCurrency, Country, type KoyweClient } from "../../src/index";
 import { isMainModule } from "../helpers/isMain";
 
 const DEMO_EMAIL = "sandbox-demo@example.com";
@@ -54,7 +54,7 @@ async function runOnRamp(koywe: KoyweClient, summary: KoyweFlowSummary) {
   console.log("\n── On-ramp: ARS → USDC (Stellar) ───────────────────────────");
   let paymentMethodId: string | undefined;
   try {
-    const providers = await koywe.getPaymentProviders("ARS");
+    const providers = await koywe.getPaymentProviders(FiatCurrency.ARS);
     summary.paymentProviders = providers.map((p) => `${p.label} (${p.id})`);
     console.log(`✔ Available rails for ARS: ${providers.map((p) => p.label).join(", ") || "none"}`);
     paymentMethodId = providers[0]?.id;
@@ -64,7 +64,7 @@ async function runOnRamp(koywe: KoyweClient, summary: KoyweFlowSummary) {
 
   let quoteId: string;
   try {
-    const quote = await koywe.getQuote({ ramp: "onramp", fiatCurrency: "ARS", amount: "10000", paymentMethodId });
+    const quote = await koywe.getQuote({ ramp: "onramp", fiatCurrency: FiatCurrency.ARS, amount: "10000", paymentMethodId });
     quoteId = quote.id;
     summary.onRampQuoteId = quote.id;
     summary.onRampDestination = `${quote.destinationAmount} ${quote.targetAsset}`;
@@ -123,8 +123,8 @@ async function runOffRamp(koywe: KoyweClient, summary: KoyweFlowSummary) {
     const account = await koywe.createBankAccount({
       email: DEMO_EMAIL,
       accountNumber: "0000053600000017871248", // sample account — the sandbox requires one of its validated numbers
-      countryCode: "AR",
-      currencySymbol: "ARS",
+      countryCode: Country.AR,
+      currencySymbol: FiatCurrency.ARS,
     });
     summary.bankAccountId = account.id;
     console.log(`✔ Bank account registered: ${account.id}`);
@@ -137,7 +137,7 @@ async function runOffRamp(koywe: KoyweClient, summary: KoyweFlowSummary) {
   }
 
   try {
-    const quote = await koywe.getQuote({ ramp: "offramp", fiatCurrency: "ARS", amount: "100" });
+    const quote = await koywe.getQuote({ ramp: "offramp", fiatCurrency: FiatCurrency.ARS, amount: "100" });
     summary.offRampQuoteId = quote.id;
     console.log(`✔ Off-ramp quote ${quote.id}: ${quote.sourceAmount} USDC → ${quote.destinationAmount} ARS`);
   } catch (error) {

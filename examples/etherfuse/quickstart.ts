@@ -11,7 +11,7 @@
 
 import "dotenv/config";
 import { generateKeyPairSync } from "node:crypto";
-import { EtherfuseClient } from "../../src/index";
+import { EtherfuseClient, Chain, FiatCurrency } from "../../src/index";
 import { isMainModule } from "../helpers/isMain";
 
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -63,7 +63,7 @@ export async function runEtherfuseQuickstart() {
     // BRL account per organization, so reuse an existing compliant one
     // before trying to create a new one (a second attempt 400s otherwise).
     const existingAccounts = await client.bankAccounts.listForCustomer(me.id);
-    const existing = existingAccounts.find((a) => a.currency?.toUpperCase() === "BRL" && a.compliant && !a.raw.deletedAt);
+    const existing = existingAccounts.find((a) => a.currency?.toUpperCase() === FiatCurrency.BRL && a.compliant && !a.raw.deletedAt);
     const account = existing ?? (await client.bankAccounts.createPixPersonal(me.id, {
       firstName: "João",
       lastName: "Silva",
@@ -78,7 +78,7 @@ export async function runEtherfuseQuickstart() {
     // and register it before ordering ("Wallet not found or not authorized"
     // otherwise).
     const publicKey = generateSolanaAddress();
-    await client.wallets.register({ publicKey, blockchain: "solana" });
+    await client.wallets.register({ publicKey, blockchain: Chain.Solana });
     console.log("Wallet:", publicKey);
 
     // 4. Don't hardcode the target asset: Etherfuse's onramp delivers one of
@@ -89,16 +89,16 @@ export async function runEtherfuseQuickstart() {
       stablebonds?: { symbol: string; bondCurrency: string; blockchains: { blockchain: string; tokenIdentifier: string; totalSupply?: string }[] }[];
     };
     const targetAsset = (catalog.stablebonds ?? [])
-      .filter((bond) => bond.bondCurrency === "BRL")
-      .flatMap((bond) => bond.blockchains.filter((b) => b.blockchain === "solana").map((b) => b.tokenIdentifier))[0];
+      .filter((bond) => bond.bondCurrency === FiatCurrency.BRL)
+      .flatMap((bond) => bond.blockchains.filter((b) => b.blockchain === Chain.Solana).map((b) => b.tokenIdentifier))[0];
     if (!targetAsset) throw new Error("No active BRL stablebond for Solana right now.");
 
     // 5. Quote: 500 BRL → the resolved stablebond on Solana (expires in 2 minutes)
     const quote = await client.quotes.create({
       customerId: me.id,
-      blockchain: "solana",
+      blockchain: Chain.Solana,
       sourceAmount: "500",
-      quoteAssets: { type: "onramp", sourceAsset: "BRL", targetAsset },
+      quoteAssets: { type: "onramp", sourceAsset: FiatCurrency.BRL, targetAsset },
     });
     console.log(`Quote: ${quote.raw.sourceAmount} BRL → ${quote.destinationAmount} (asset ${targetAsset})`);
 

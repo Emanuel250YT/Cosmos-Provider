@@ -32,7 +32,7 @@
  */
 
 import { createServer } from "node:http";
-import { CosmosRamp, MercadoPagoProvider, verifyCosmosSignature, type RampOrderData } from "../../src/index";
+import { CosmosRamp, MercadoPagoProvider, verifyCosmosSignature, FiatCurrency, type RampOrderData } from "../../src/index";
 import { createMockMercadoPago } from "../helpers/mock-mercadopago";
 import { isMainModule } from "../helpers/isMain";
 
@@ -103,7 +103,7 @@ export async function runSettlementDemo(): Promise<SettlementDemoSummary> {
   try {
     // 1 ────────────────────────────────────────────────────────────────────
     step("1. Quote: 5 000 ARS → USDC with a 2% spread");
-    const quote = await ramp.quote({ direction: "onramp", currency: "ARS", amount: 5_000, spread: 0.02 });
+    const quote = await ramp.quote({ direction: "onramp", currency: FiatCurrency.ARS, amount: 5_000, spread: 0.02 });
     console.log(`   rate ${quote.rate} → effective ${quote.effectiveRate} | user gets ${quote.cryptoAmount} USDC`);
 
     // 2 ────────────────────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ export async function runSettlementDemo(): Promise<SettlementDemoSummary> {
     const linkOrder = await ramp.onramp({
       provider: "mercadopago",
       amount: 5_000,
-      currency: "ARS",
+      currency: FiatCurrency.ARS,
       spread: 0.02,
       wallet: "USER_WALLET_1",
       method: "link",
@@ -135,7 +135,7 @@ export async function runSettlementDemo(): Promise<SettlementDemoSummary> {
     const qrOrder = await ramp.onramp({
       provider: "mercadopago",
       amount: 50,
-      currency: "BRL",
+      currency: FiatCurrency.BRL,
       spread: 0.015,
       wallet: "USER_WALLET_2",
       method: "qr",
@@ -150,7 +150,7 @@ export async function runSettlementDemo(): Promise<SettlementDemoSummary> {
     const badOrder = await ramp.onramp({
       provider: "mercadopago",
       amount: 1_000,
-      currency: "ARS",
+      currency: FiatCurrency.ARS,
       spread: 0.02,
       wallet: "USER_WALLET_3",
       method: "link",
@@ -164,7 +164,7 @@ export async function runSettlementDemo(): Promise<SettlementDemoSummary> {
     const offramp = await ramp.offramp({
       provider: "mercadopago",
       cryptoAmount: 100,
-      currency: "ARS",
+      currency: FiatCurrency.ARS,
       spread: 0.02,
       destination: { email: "user@example.com" },
     });

@@ -12,7 +12,7 @@
  */
 
 import "dotenv/config";
-import { MercadoPagoProvider, type Charge } from "../../src/index";
+import { MercadoPagoProvider, FiatCurrency, type Charge } from "../../src/index";
 import { isMainModule } from "../helpers/isMain";
 
 export async function createPaymentLinkExample(): Promise<Charge | null> {
@@ -23,7 +23,7 @@ export async function createPaymentLinkExample(): Promise<Charge | null> {
     console.log("Skipped: set MP_AR_ACCESS_TOKEN or MP_BR_ACCESS_TOKEN in .env to run this example.");
     return null;
   }
-  const currency = arToken ? "ARS" : "BRL";
+  const currency = arToken ? FiatCurrency.ARS : FiatCurrency.BRL;
 
   const mercadopago = new MercadoPagoProvider({
     accessToken,
@@ -37,7 +37,7 @@ export async function createPaymentLinkExample(): Promise<Charge | null> {
   });
 
   const charge = await mercadopago.createPaymentLink({
-    amount: currency === "ARS" ? 5_000 : 50,
+    amount: currency === FiatCurrency.ARS ? 5_000 : 50,
     currency,
     reference: `cosmos-demo-${Date.now()}`,
     description: "cosmos-providers demo — payment link",

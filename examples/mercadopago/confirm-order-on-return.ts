@@ -8,7 +8,7 @@
  * Run with: npx tsx examples/mercadopago/confirm-order-on-return.ts
  */
 
-import { CosmosRamp, MercadoPagoProvider } from "../../src/index";
+import { CosmosRamp, MercadoPagoProvider, FiatCurrency } from "../../src/index";
 import { createMockMercadoPago } from "../helpers/mock-mercadopago";
 import { isMainModule } from "../helpers/isMain";
 
@@ -60,7 +60,7 @@ async function main() {
   const order = await ramp.onramp({
     provider: "mercadopago",
     amount: 5_000,
-    currency: "ARS",
+    currency: FiatCurrency.ARS,
     wallet: "USER_WALLET",
     method: "link",
   });

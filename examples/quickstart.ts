@@ -5,7 +5,7 @@
  * Env vars: MP_ACCESS_TOKEN, MP_WEBHOOK_SECRET (optional)
  */
 
-import { CosmosRamp, CoinGeckoOracle, MercadoPagoProvider } from "../src/index";
+import { CosmosRamp, CoinGeckoOracle, MercadoPagoProvider, FiatCurrency, Asset } from "../src/index";
 
 const ramp = new CosmosRamp({
   providers: [
@@ -30,8 +30,8 @@ async function main() {
   const order = await ramp.onramp({
     provider: "mercadopago",
     amount: 5000, // ARS
-    currency: "ARS",
-    asset: "USDC",
+    currency: FiatCurrency.ARS,
+    asset: Asset.USDC,
     spread: 0.02, // 2% margin
     wallet: "USER_WALLET_ADDRESS",
     method: "link",
