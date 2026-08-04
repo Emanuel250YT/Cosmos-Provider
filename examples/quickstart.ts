@@ -27,7 +27,7 @@ async function main() {
   // Build the payment: the CoinGecko rate + your spread are locked here.
   const order = await ramp.onramp({
     provider: "mercadopago",
-    amount: 50000, // ARS
+    amount: 5000, // ARS
     currency: "ARS",
     asset: "USDC",
     spread: 0.02, // 2% margin

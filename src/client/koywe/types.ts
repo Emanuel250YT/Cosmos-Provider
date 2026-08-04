@@ -1,12 +1,22 @@
 /** Types for {@link KoyweClient} — the Koywe crypto fiat on/off-ramp API. */
 
+import type { Environment } from "@/atoms/constants";
+
 export interface KoyweConfig {
   /** OAuth-style client id issued by Koywe. Server-side only. */
   clientId: string;
   /** Secret paired with `clientId`. Never expose to the browser. */
   secret: string;
-  /** `https://api-sandbox.koywe.com` (sandbox) or the production base URL. */
-  baseUrl: string;
+  /**
+   * `"sandbox"` (default) or `"production"` — picks the matching base URL
+   * (`https://api-sandbox.koywe.com` / `https://api.koywe.com`) unless
+   * `baseUrl` overrides it. Verify the production URL against your Koywe
+   * dashboard before going live; Koywe's public docs don't always render
+   * for automated fetches, so treat it as a sane default, not gospel.
+   */
+  environment?: Environment;
+  /** Explicit override of the base URL derived from `environment` (e.g. for a proxy). */
+  baseUrl?: string;
   /** Issuer account of the USDC trustline on Stellar, injected into `supportedTokens`. */
   usdcIssuer: string;
   /** Default email used when a call doesn't pass one explicitly. */

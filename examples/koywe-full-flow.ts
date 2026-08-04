@@ -23,7 +23,7 @@
 
 import "dotenv/config";
 import { Keypair, Horizon } from "@stellar/stellar-sdk";
-import { KoyweClient, KoyweError } from "../src/index";
+import { CosmosClient, KoyweError, type KoyweClient } from "../src/index";
 import { isMainModule } from "./helpers/isMain";
 
 const DEMO_EMAIL = "sandbox-demo@example.com";
@@ -173,13 +173,20 @@ export async function runKoyweFlow(): Promise<KoyweFlowSummary | null> {
     return null;
   }
 
-  const koywe = new KoyweClient({
-    clientId: CLIENT_ID,
-    secret: SECRET,
-    baseUrl: process.env.KOYWE_BASE_URL || "https://api-sandbox.koywe.com",
-    usdcIssuer: process.env.PUBLIC_USDC_ISSUER || "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
-    debug: Boolean(process.env.DEBUG),
+  const cosmos = new CosmosClient({
+    koywe: {
+      clientId: CLIENT_ID,
+      secret: SECRET,
+      // "sandbox" (default) or "production" — picks the matching base URL.
+      // KOYWE_BASE_URL still overrides it outright, e.g. for a proxy.
+      environment: (process.env.KOYWE_ENVIRONMENT as "sandbox" | "production" | undefined) ?? "sandbox",
+      baseUrl: process.env.KOYWE_BASE_URL,
+      usdcIssuer: process.env.PUBLIC_USDC_ISSUER || "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      debug: Boolean(process.env.DEBUG),
+    },
   });
+  console.log(`ℹ Koywe: environment=${cosmos.koywe!.environment}, baseUrl=${cosmos.koywe!.baseUrl}`);
+  const koywe = cosmos.koywe!;
 
   const summary: KoyweFlowSummary = {};
   try {

@@ -23,18 +23,42 @@ describe("KoyweClient construction", () => {
     ).toThrow(KoyweError);
   });
 
-  it("requires a baseUrl", () => {
-    expect(
-      () => new KoyweClient({ clientId: "a", secret: "b", baseUrl: "", usdcIssuer: "G" }),
-    ).toThrow(KoyweError);
-  });
-
   it("exposes the injected USDC issuer in supportedTokens", () => {
     const { fetchImpl } = createMockFetch([]);
     const koywe = client(fetchImpl);
     expect(koywe.supportedTokens).toEqual([
       { symbol: "USDC", name: "USD Coin", issuer: "GISSUER", koyweSymbol: "USDC Stellar", decimals: 6 },
     ]);
+  });
+});
+
+describe("KoyweClient environment/baseUrl", () => {
+  it("defaults to sandbox and its base URL when neither is given", () => {
+    const koywe = new KoyweClient({ clientId: "a", secret: "b", usdcIssuer: "G" });
+    expect(koywe.environment).toBe("sandbox");
+    expect(koywe.baseUrl).toBe("https://api-sandbox.koywe.com");
+  });
+
+  it("resolves the production base URL from environment: \"production\"", () => {
+    const koywe = new KoyweClient({ clientId: "a", secret: "b", usdcIssuer: "G", environment: "production" });
+    expect(koywe.environment).toBe("production");
+    expect(koywe.baseUrl).toBe("https://api.koywe.com");
+  });
+
+  it("an explicit baseUrl overrides the environment default", () => {
+    const koywe = new KoyweClient({
+      clientId: "a",
+      secret: "b",
+      usdcIssuer: "G",
+      environment: "production",
+      baseUrl: "https://proxy.example.com/koywe/",
+    });
+    expect(koywe.baseUrl).toBe("https://proxy.example.com/koywe"); // trailing slash trimmed
+  });
+
+  it("falls through to the environment default when baseUrl is an empty string", () => {
+    const koywe = new KoyweClient({ clientId: "a", secret: "b", usdcIssuer: "G", baseUrl: "" });
+    expect(koywe.baseUrl).toBe("https://api-sandbox.koywe.com");
   });
 });
 

@@ -362,3 +362,111 @@ describe("WebhookEmitter", () => {
     expect(requests).toHaveLength(2);
   });
 });
+
+describe("MercadoPagoProvider multi-account (per-country credentials)", () => {
+  it("defaults to name \"mercadopago\" and all seven markets", () => {
+    const { fetchImpl } = createMockFetch([]);
+    const mp = provider(fetchImpl);
+    expect(mp.name).toBe("mercadopago");
+    expect(mp.regions).toEqual(["AR", "BR", "MX", "CL", "CO", "PE", "UY"]);
+    expect(mp.currencies).toEqual(["ARS", "BRL", "MXN", "CLP", "COP", "PEN", "UYU"]);
+  });
+
+  it("accepts a custom name and a narrowed regions/currencies set", () => {
+    const { fetchImpl } = createMockFetch([]);
+    const ar = new MercadoPagoProvider({
+      accessToken: "TEST-ar-token",
+      name: "mercadopago-ar",
+      regions: ["AR"],
+      currencies: ["ARS"],
+      fetch: fetchImpl,
+    });
+    expect(ar.name).toBe("mercadopago-ar");
+    expect(ar.regions).toEqual(["AR"]);
+    expect(ar.currencies).toEqual(["ARS"]);
+  });
+
+  it("registers two country-scoped instances in the same CosmosRamp under distinct names", async () => {
+    const { CosmosRamp } = await import("@/core/CosmosRamp");
+    const { fetchImpl: arFetch, requests: arRequests } = createMockFetch([
+      { route: "POST /checkout/preferences", response: { id: "ar-pref", init_point: "https://mp.example/ar" } },
+    ]);
+    const { fetchImpl: brFetch, requests: brRequests } = createMockFetch([
+      {
+        route: "POST /v1/payments",
+        response: { id: 999, point_of_interaction: { transaction_data: { qr_code: "00020126...BR" } } },
+      },
+    ]);
+
+    const ar = new MercadoPagoProvider({
+      accessToken: "TEST-ar-token",
+      name: "mercadopago-ar",
+      regions: ["AR"],
+      currencies: ["ARS"],
+      fetch: arFetch,
+    });
+    const br = new MercadoPagoProvider({
+      accessToken: "TEST-br-token",
+      name: "mercadopago-br",
+      regions: ["BR"],
+      currencies: ["BRL"],
+      defaultPayerEmail: "buyer@example.com.br",
+      fetch: brFetch,
+    });
+
+    const ramp = new CosmosRamp({
+      providers: [ar, br],
+      oracle: { getRate: async () => 1000 },
+    });
+
+    const arOrder = await ramp.onramp({ provider: "mercadopago-ar", amount: 1000, currency: "ARS", method: "link" });
+    expect(arOrder.charge?.link).toBe("https://mp.example/ar");
+    expect(arRequests[0]!.headers["authorization"]).toBe("Bearer TEST-ar-token");
+
+    const brOrder = await ramp.onramp({ provider: "mercadopago-br", amount: 100, currency: "BRL", method: "qr" });
+    expect(brOrder.charge?.qr).toBe("00020126...BR");
+    expect(brRequests[0]!.headers["authorization"]).toBe("Bearer TEST-br-token");
+
+    // Cada instancia solo acepta la moneda de su propio mercado — pedirle a
+    // la de Argentina que cobre en reales es un error claro, no un 401
+    // confuso de la API real.
+    await expect(
+      ramp.onramp({ provider: "mercadopago-ar", amount: 100, currency: "BRL", method: "qr" }),
+    ).rejects.toThrow(/does not support BRL/);
+  });
+});
+
+describe("MercadoPagoProvider per-account baseUrl", () => {
+  it("defaults every account to https://api.mercadopago.com", () => {
+    const { fetchImpl } = createMockFetch([]);
+    const mp = provider(fetchImpl);
+    expect(mp.baseUrl).toBe("https://api.mercadopago.com");
+  });
+
+  it("lets an `accounts` entry route through its own base URL, independent of the others", async () => {
+    const { fetchImpl: arFetch, requests: arRequests } = createMockFetch([
+      { route: "POST /checkout/preferences", response: { id: "ar-pref", init_point: "https://mp.example/ar" } },
+    ]);
+    const { fetchImpl: proxyFetch, requests: proxyRequests } = createMockFetch([
+      { route: "POST /mp/checkout/preferences", response: { id: "br-pref", init_point: "https://mp.example/br" } },
+    ]);
+    const dispatch: typeof fetch = (async (input, init) => {
+      const url = String(input);
+      return url.startsWith("https://proxy.example.com") ? proxyFetch(input, init) : arFetch(input, init);
+    }) as typeof fetch;
+
+    const mp = new MercadoPagoProvider({
+      accessToken: "TEST-ar-token", // default account, uses the top-level baseUrl
+      accounts: {
+        BRL: { accessToken: "TEST-br-token", baseUrl: "https://proxy.example.com/mp" },
+      },
+      fetch: dispatch,
+    });
+
+    await mp.createCharge({ amount: 100, currency: "ARS", method: "link", reference: "ar-1" });
+    expect(arRequests[0]!.url.startsWith("https://api.mercadopago.com")).toBe(true);
+
+    await mp.createCharge({ amount: 100, currency: "BRL", method: "link", reference: "br-1" });
+    expect(proxyRequests[0]!.url).toBe("https://proxy.example.com/mp/checkout/preferences");
+  });
+});

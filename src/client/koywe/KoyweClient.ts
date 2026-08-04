@@ -1,8 +1,6 @@
 /**
- * KoyweClient — client for the Koywe crypto fiat on/off-ramp API
- * (`https://api-sandbox.koywe.com` in sandbox, docs at
- * https://docs-crypto.koywe.com). Zero dependencies — copy the whole
- * `koywe/` folder into any TypeScript project.
+ * KoyweClient — client for the Koywe crypto fiat on/off-ramp API. Zero
+ * dependencies — copy the whole `koywe/` folder into any TypeScript project.
  *
  * **Server-side only** — authenticates with a `clientId`/`secret` pair that
  * must never reach the browser. Exchanges them for a 24h JWT
@@ -17,15 +15,19 @@
  * const koywe = new KoyweClient({
  *   clientId: process.env.KOYWE_CLIENT_ID!,
  *   secret: process.env.KOYWE_SECRET!,
- *   baseUrl: process.env.KOYWE_BASE_URL!, // https://api-sandbox.koywe.com
+ *   environment: "sandbox", // or "production" — picks the matching base URL
  *   usdcIssuer: process.env.PUBLIC_USDC_ISSUER!,
  * });
+ *
+ * koywe.environment; // "sandbox"
+ * koywe.baseUrl;     // "https://api-sandbox.koywe.com"
  *
  * const quote = await koywe.getQuote({ ramp: "onramp", fiatCurrency: "ARS", amount: "10000" });
  * const order = await koywe.createOnRampOrder({ quoteId: quote.id, stellarAddress: "G..." });
  * ```
  */
 
+import { Environments, type Environment } from "@/atoms/constants";
 import { Asset, FiatCurrency } from "@/atoms/enums";
 import { KoyweError } from "./errors";
 import { isValidStellarPublicKey } from "./stellarKey";
@@ -59,6 +61,20 @@ import type {
   KoyweErrorResponse,
 } from "./types";
 
+/** Constructor options for {@link KoyweClient}. */
+export type KoyweClientOptions = KoyweConfig & { fetch?: typeof fetch };
+
+/**
+ * Base URL per environment. Sandbox is confirmed against Koywe's own
+ * reference client; production is the conventional `api.` counterpart —
+ * double-check it against your Koywe dashboard, or pass `baseUrl` to
+ * override it outright.
+ */
+const KOYWE_BASE_URLS: Record<Environment, string> = {
+  sandbox: "https://api-sandbox.koywe.com",
+  production: "https://api.koywe.com",
+};
+
 /** Koywe's symbol for USDC on Stellar in quote/order requests. */
 const USDC_STELLAR_SYMBOL = `${Asset.USDC} Stellar`;
 /** The display symbol exposed to callers for the Stellar leg. */
@@ -89,6 +105,10 @@ export class KoyweClient {
   ];
   /** Local payment rails surfaced for Koywe (per market). */
   readonly supportedRails: readonly KoyweRail[] = ["wirear", "qri", "spei", "pse"];
+  /** `"sandbox"` or `"production"` — from `config.environment`, default `"sandbox"`. */
+  readonly environment: Environment;
+  /** Resolved base URL: `config.baseUrl` if given, otherwise the one matching `environment`. */
+  readonly baseUrl: string;
 
   readonly #config: KoyweConfig;
   #fetch: typeof fetch;
@@ -99,13 +119,13 @@ export class KoyweClient {
    */
   readonly #tokens = new Map<string, string>();
 
-  constructor(config: KoyweConfig & { fetch?: typeof fetch }) {
+  constructor(config: KoyweClientOptions) {
     if (!config.clientId || !config.secret) {
       throw new KoyweError("`clientId` and `secret` are required.", "MISSING_CREDENTIALS", 400);
     }
-    if (!config.baseUrl) {
-      throw new KoyweError("`baseUrl` is required.", "MISSING_BASE_URL", 400);
-    }
+    this.environment = config.environment ?? Environments.Sandbox;
+    // `||`, not `??`: an empty-string override should also fall through to the environment default.
+    this.baseUrl = (config.baseUrl || KOYWE_BASE_URLS[this.environment]).replace(/\/+$/, "");
     this.#config = config;
     this.#fetch = config.fetch ?? globalThis.fetch?.bind(globalThis);
     if (typeof this.#fetch !== "function") {
@@ -479,7 +499,7 @@ export class KoyweClient {
     const cached = this.#tokens.get(key);
     if (cached) return cached;
 
-    const url = `${this.#config.baseUrl}/rest/auth`;
+    const url = `${this.baseUrl}/rest/auth`;
     let response: Response;
     try {
       response = await this.#fetch(url, {
@@ -517,7 +537,7 @@ export class KoyweClient {
     email?: string,
   ): Promise<T> {
     const token = await this.#authToken(email);
-    const url = `${this.#config.baseUrl}${endpoint}`;
+    const url = `${this.baseUrl}${endpoint}`;
     this.#debugLog(`${method} ${url}`, body ? JSON.stringify(body) : "");
 
     let response: Response;

@@ -96,7 +96,12 @@ function printOverallSummary(ran: Ran) {
   console.log(line("Koywe", ran.koywe));
   console.log(line("SEP-1/10/24", ran.sep));
   console.log("══════════════════════════════════════════════════════════");
-  if (!ran.mercadopago) console.log("  ℹ Mercado Pago se salteó: falta MP_ACCESS_TOKEN en .env.");
+  if (!ran.mercadopago) {
+    console.log(
+      "  ℹ Mercado Pago se salteó: falta un token TEST-... en .env " +
+        "(o hay uno de producción pero MP_ALLOW_PRODUCTION no es \"true\" — ver arriba).",
+    );
+  }
   if (!ran.koywe) console.log("  ℹ Koywe se salteó: faltan KOYWE_CLIENT_ID/KOYWE_SECRET en .env.");
 }
 

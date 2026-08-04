@@ -8,6 +8,10 @@
  * Node-only webhook verification lives in `cosmos-providers/webhooks`.
  */
 
+// Unified client (single entry point: ramp + Etherfuse + Koywe + SEP helpers)
+export { CosmosClient } from "@/core/CosmosClient";
+export type { CosmosClientOptions, SepHelpers } from "@/core/CosmosClient";
+
 // Core engine (provider-agnostic onramp/offramp)
 export { CosmosRamp } from "@/core/CosmosRamp";
 export type {

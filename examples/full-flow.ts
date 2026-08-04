@@ -45,7 +45,7 @@ import "dotenv/config";
 import { randomBytes, generateKeyPairSync } from "node:crypto";
 import { keccak256 } from "js-sha3";
 import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset as StellarAsset, BASE_FEE } from "@stellar/stellar-sdk";
-import { EtherfuseClient, EtherfuseAPIError, Pix, Chain, FiatCurrency, Asset, type Quote, type OrderReceipt } from "../src/index";
+import { CosmosClient, EtherfuseAPIError, Pix, Chain, FiatCurrency, Asset, type EtherfuseClient, type Quote, type OrderReceipt } from "../src/index";
 import { isMainModule } from "./helpers/isMain";
 
 /** Moneda que este flujo soporta (Etherfuse liquida solo BRL/MXN hoy). */
@@ -75,7 +75,9 @@ const FALLBACK_TARGET_ASSET: Record<EtherfuseFiat, Partial<Record<Chain, string>
 
 // Se construyen recién dentro de `runEtherfuseFlow()`, solo si hay API key —
 // así este módulo se puede importar (p. ej. desde all-flows.ts) sin
-// necesitar ETHERFUSE_API_KEY configurada.
+// necesitar ETHERFUSE_API_KEY configurada. Todo sale de UN `CosmosClient`
+// (`cosmos.etherfuse`), no de un `EtherfuseClient` armado por separado.
+let cosmos: CosmosClient;
 let client: EtherfuseClient;
 const stellarServer = new Horizon.Server("https://horizon-testnet.stellar.org");
 
@@ -412,7 +414,8 @@ export async function runEtherfuseFlow(): Promise<ChainResult[] | null> {
     console.error("⚠ Falta ETHERFUSE_API_KEY (ponla en .env) — salteo el flujo de Etherfuse.");
     return null;
   }
-  client = new EtherfuseClient({ apiKey: API_KEY, environment: "sandbox" });
+  cosmos = new CosmosClient({ etherfuse: { apiKey: API_KEY, environment: "sandbox" } });
+  client = cosmos.etherfuse!;
   client.on("debug", (m) => process.env.DEBUG && console.log(m));
   chainResults = [];
 
@@ -473,7 +476,7 @@ export async function runEtherfuseFlow(): Promise<ChainResult[] | null> {
     await runChain(me.id, currency, bankAccountId, chain);
   }
 
-  client.destroy();
+  cosmos.destroy();
   return chainResults;
 }
 

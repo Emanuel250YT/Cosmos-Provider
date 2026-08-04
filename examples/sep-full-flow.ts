@@ -22,16 +22,12 @@
 
 import "dotenv/config";
 import { Keypair, Horizon, TransactionBuilder } from "@stellar/stellar-sdk";
-import {
-  fetchStellarToml,
-  authenticateSep10,
-  getSep24Info,
-  startDeposit,
-  getSep24Transaction,
-  SEP24_TERMINAL_STATUSES,
-} from "../src/index";
+import { CosmosClient, SEP24_TERMINAL_STATUSES } from "../src/index";
 import { isMainModule } from "./helpers/isMain";
 
+// `CosmosClient` sin proveedores solo te da `.sep` — los helpers SEP-1/10/24
+// bindeados en un solo lugar, sin tener que importar cada función suelta.
+const { fetchStellarToml, authenticateSep10, getSep24Info, startDeposit, getSep24Transaction } = new CosmosClient({}).sep;
 const stellarServer = new Horizon.Server("https://horizon-testnet.stellar.org");
 
 export interface SepFlowSummary {
