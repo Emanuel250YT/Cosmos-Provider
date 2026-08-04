@@ -1,47 +1,52 @@
 /**
- * Corre TODOS los flujos reales del paquete, uno detrás del otro, en una
- * sola ejecución: Etherfuse (las 5 chains), Mercado Pago, Koywe y el módulo
- * SEP-1/10/24 genérico. Es la versión "todo junto" de:
+ * Runs every real flow this package ships, one after another, in a single
+ * execution: Etherfuse (all 5 chains), Mercado Pago (payment link + PIX),
+ * Koywe, and the generic SEP-1/10/24 module. It's the "everything at once"
+ * version of:
  *
- *   npm run flow             (solo Etherfuse)
- *   npm run flow:mercadopago
+ *   npm run flow                      (Etherfuse only)
+ *   npm run flow:mercadopago:link
+ *   npm run flow:mercadopago:pix
  *   npm run flow:koywe
  *   npm run flow:sep
  *
- * Ejecutá: `npm run flow:all`.
+ * Run: `npm run flow:all`.
  *
- * DISEÑO: ningún proveedor bloquea a los demás.
- * - Cada flujo corre en su propio try/catch — si Etherfuse falla entero, se
- *   anota y se sigue igual con Mercado Pago, Koywe y SEP (y viceversa).
- * - Los que necesitan credenciales que no están en `.env` (Mercado Pago,
- *   Koywe) devuelven `null` y se saltean prolijamente — no hace falta tener
- *   las cuatro cuentas configuradas para que esto sirva de algo. Etherfuse y
- *   SEP no necesitan credenciales propias (Etherfuse solo su API key de
- *   sandbox; SEP corre contra un anchor de referencia público, generando su
- *   propia wallet de prueba).
- * - Cada flujo interno ya tiene su propio diseño "nunca bloquea" (ver el
- *   comentario de cabecera de cada archivo) — acá simplemente se encadenan.
- * - Al final se imprime el resumen de CADA flujo que sí corrió, uno atrás
- *   del otro, más un resumen de una línea de qué se corrió y qué se salteó.
+ * DESIGN: no provider blocks the others.
+ * - Each flow runs in its own try/catch — if Etherfuse fails entirely, it's
+ *   logged and the script still moves on to Mercado Pago, Koywe, and SEP
+ *   (and vice versa).
+ * - The ones that need credentials not present in `.env` (Mercado Pago,
+ *   Koywe) return `null` and are skipped cleanly — you don't need all four
+ *   accounts configured for this to be useful. Etherfuse and SEP need no
+ *   credentials of their own (Etherfuse only a sandbox API key; SEP runs
+ *   against a public reference anchor, generating its own throwaway wallet).
+ * - Each flow already has its own "never blocks" design (see that file's
+ *   header comment) — this just chains them.
+ * - At the end, every flow that actually ran prints its own summary, one
+ *   after another, plus a one-line overview of what ran and what was
+ *   skipped.
  */
 
 import "dotenv/config";
 import { runEtherfuseFlow, printEtherfuseSummary } from "./full-flow";
-import { runMercadoPagoFlow, printMercadoPagoSummary } from "./mercadopago-full-flow";
+import { createPaymentLinkExample } from "./mercadopago-payment-link";
+import { createPixChargeExample } from "./mercadopago-pix";
 import { runKoyweFlow, printKoyweSummary } from "./koywe-full-flow";
 import { runSepFlow, printSepSummary } from "./sep-full-flow";
 
 interface Ran {
   etherfuse: boolean;
-  mercadopago: boolean;
+  mercadopagoLink: boolean;
+  mercadopagoPix: boolean;
   koywe: boolean;
   sep: boolean;
 }
 
 async function main(): Promise<Ran> {
-  const ran: Ran = { etherfuse: false, mercadopago: false, koywe: false, sep: false };
+  const ran: Ran = { etherfuse: false, mercadopagoLink: false, mercadopagoPix: false, koywe: false, sep: false };
 
-  console.log("\n\n█████ 1/4 — Etherfuse (todas las chains) █████████████████");
+  console.log("\n\n█████ 1/5 — Etherfuse (all chains) ████████████████████████");
   try {
     const results = await runEtherfuseFlow();
     if (results) {
@@ -49,21 +54,26 @@ async function main(): Promise<Ran> {
       ran.etherfuse = true;
     }
   } catch (error) {
-    console.error("✘ El flujo de Etherfuse falló por completo — sigo con el resto:", error);
+    console.error("✘ The Etherfuse flow failed entirely — continuing with the rest:", error);
   }
 
-  console.log("\n\n█████ 2/4 — Mercado Pago ██████████████████████████████████");
+  console.log("\n\n█████ 2/5 — Mercado Pago: payment link ████████████████████");
   try {
-    const results = await runMercadoPagoFlow();
-    if (results) {
-      printMercadoPagoSummary(results);
-      ran.mercadopago = true;
-    }
+    const charge = await createPaymentLinkExample();
+    ran.mercadopagoLink = charge !== null;
   } catch (error) {
-    console.error("✘ El flujo de Mercado Pago falló por completo — sigo con el resto:", error);
+    console.error("✘ The Mercado Pago payment-link flow failed entirely — continuing with the rest:", error);
   }
 
-  console.log("\n\n█████ 3/4 — Koywe █████████████████████████████████████████");
+  console.log("\n\n█████ 3/5 — Mercado Pago: PIX ██████████████████████████████");
+  try {
+    const charge = await createPixChargeExample();
+    ran.mercadopagoPix = charge !== null;
+  } catch (error) {
+    console.error("✘ The Mercado Pago PIX flow failed entirely — continuing with the rest:", error);
+  }
+
+  console.log("\n\n█████ 4/5 — Koywe █████████████████████████████████████████");
   try {
     const summary = await runKoyweFlow();
     if (summary) {
@@ -71,40 +81,47 @@ async function main(): Promise<Ran> {
       ran.koywe = true;
     }
   } catch (error) {
-    console.error("✘ El flujo de Koywe falló por completo — sigo con el resto:", error);
+    console.error("✘ The Koywe flow failed entirely — continuing with the rest:", error);
   }
 
-  console.log("\n\n█████ 4/4 — SEP-1/10/24 ███████████████████████████████████");
+  console.log("\n\n█████ 5/5 — SEP-1/10/24 ███████████████████████████████████");
   try {
     const summary = await runSepFlow();
     printSepSummary(summary);
     ran.sep = true;
   } catch (error) {
-    console.error("✘ El flujo SEP falló por completo:", error);
+    console.error("✘ The SEP flow failed entirely:", error);
   }
 
   return ran;
 }
 
 function printOverallSummary(ran: Ran) {
-  const line = (label: string, ok: boolean) => `  ${ok ? "✔" : "✘ (salteado o falló)"}  ${label}`;
+  const line = (label: string, ok: boolean) => `  ${ok ? "✔" : "✘ (skipped or failed)"}  ${label}`;
   console.log("\n\n══════════════════════════════════════════════════════════");
-  console.log("  RESUMEN GENERAL — all-flows.ts");
+  console.log("  OVERALL SUMMARY — all-flows.ts");
   console.log("══════════════════════════════════════════════════════════");
-  console.log(line("Etherfuse (todas las chains)", ran.etherfuse));
-  console.log(line("Mercado Pago", ran.mercadopago));
+  console.log(line("Etherfuse (all chains)", ran.etherfuse));
+  console.log(line("Mercado Pago — payment link", ran.mercadopagoLink));
+  console.log(line("Mercado Pago — PIX", ran.mercadopagoPix));
   console.log(line("Koywe", ran.koywe));
   console.log(line("SEP-1/10/24", ran.sep));
   console.log("══════════════════════════════════════════════════════════");
-  if (!ran.mercadopago) {
-    console.log("  ℹ Mercado Pago se salteó: faltan MP_AR_ACCESS_TOKEN y/o MP_BR_ACCESS_TOKEN en .env.");
+  if (!ran.mercadopagoLink) {
+    console.log("  ℹ Mercado Pago payment link skipped: set MP_AR_ACCESS_TOKEN or MP_BR_ACCESS_TOKEN in .env.");
   }
-  if (!ran.koywe) console.log("  ℹ Koywe se salteó: faltan KOYWE_CLIENT_ID/KOYWE_SECRET en .env.");
+  if (!ran.mercadopagoPix) {
+    console.log(
+      "  ℹ Mercado Pago PIX skipped: set MP_BR_ACCESS_TOKEN in .env to a REAL production account " +
+        "(PIX has no sandbox mode).",
+    );
+  }
+  if (!ran.koywe) console.log("  ℹ Koywe skipped: set KOYWE_CLIENT_ID/KOYWE_SECRET in .env.");
 }
 
 main()
   .then(printOverallSummary)
   .catch((error) => {
-    // Red de seguridad: cada flujo ya atrapa lo suyo, esto no debería disparar.
-    console.error("\n✘ Error inesperado en all-flows.ts:", error);
+    // Safety net: each flow already catches its own errors, this shouldn't fire.
+    console.error("\n✘ Unexpected error in all-flows.ts:", error);
   });

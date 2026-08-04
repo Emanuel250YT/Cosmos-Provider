@@ -15,7 +15,7 @@ import type {
 import { BaseManager } from "@/organisms/BaseManager";
 
 export class BankAccountManager extends BaseManager {
-  /** Crea una cuenta bancaria con el payload crudo de la API. */
+  /** Creates a bank account with the API's raw payload. */
   async create(customerId: string, payload: CreateBankAccountPayload): Promise<BankAccount> {
     const raw = await this.rest.post<APIBankAccount>(Routes.customerBankAccount(customerId), {
       ...payload,
@@ -24,7 +24,7 @@ export class BankAccountManager extends BaseManager {
     return new BankAccount(this.client, raw);
   }
 
-  /** Atajo: cuenta PIX de persona física (BRL). */
+  /** Shortcut: individual PIX account (BRL). */
   createPixPersonal(
     customerId: string,
     account: CreatePixPersonalAccount,
@@ -33,7 +33,7 @@ export class BankAccountManager extends BaseManager {
     return this.create(customerId, { account, label });
   }
 
-  /** Atajo: cuenta PIX de empresa (BRL). */
+  /** Shortcut: business PIX account (BRL). */
   createPixBusiness(
     customerId: string,
     account: CreatePixBusinessAccount,
@@ -42,7 +42,7 @@ export class BankAccountManager extends BaseManager {
     return this.create(customerId, { account, label });
   }
 
-  /** Atajo: cuenta CLABE de persona física (MXN). */
+  /** Shortcut: individual CLABE account (MXN). */
   createClabePersonal(
     customerId: string,
     account: CreateClabePersonalAccount,
@@ -51,7 +51,7 @@ export class BankAccountManager extends BaseManager {
     return this.create(customerId, { account, label });
   }
 
-  /** Atajo: cuenta CLABE de empresa (MXN). */
+  /** Shortcut: business CLABE account (MXN). */
   createClabeBusiness(
     customerId: string,
     account: CreateClabeBusinessAccount,
@@ -60,13 +60,13 @@ export class BankAccountManager extends BaseManager {
     return this.create(customerId, { account, label });
   }
 
-  /** Una cuenta bancaria por id. */
+  /** A bank account by id. */
   async fetch(bankAccountId: string): Promise<BankAccount> {
     const raw = await this.rest.get<APIBankAccount>(Routes.bankAccountById(bankAccountId));
     return new BankAccount(this.client, raw);
   }
 
-  /** Lista paginada de cuentas bancarias de la organización. */
+  /** Paginated list of the organization's bank accounts. */
   async list(query: PageQuery = {}): Promise<Page<BankAccount>> {
     const raw = await this.rest.get<Page<APIBankAccount>>(Routes.bankAccounts(), {
       query: { pageNumber: query.pageNumber, pageSize: query.pageSize },
@@ -74,7 +74,7 @@ export class BankAccountManager extends BaseManager {
     return { ...raw, items: (raw.items ?? []).map((a) => new BankAccount(this.client, a)) };
   }
 
-  /** Cuentas de un customer concreto. */
+  /** Accounts belonging to a specific customer. */
   async listForCustomer(customerId: string): Promise<BankAccount[]> {
     const raw = await this.rest.get<Page<APIBankAccount> | APIBankAccount[]>(
       Routes.customerBankAccounts(customerId),

@@ -3,14 +3,29 @@
  * Peru, Uruguay).
  *
  * Talks to the Mercado Pago REST API directly with `fetch` — no SDK
- * dependency. Supports:
+ * dependency. Payment link and PIX are two genuinely different ways to
+ * collect money (different endpoints, different account requirements,
+ * different countries), so each has its own explicit method rather than
+ * one method with a `method` flag:
  *
- * - `link`     → Checkout Pro preference (`init_point` payment link).
- * - `qr`       → PIX QR for BRL; in-store dynamic QR when a POS is configured
- *                (`qrPos` option); falls back to a payment link otherwise.
+ * - {@link createPaymentLink} → Checkout Pro preference (`init_point`
+ *   payment link). Works in every market this provider supports, and is
+ *   the one that's safe to exercise against sandbox/test credentials.
+ * - {@link createPixCharge}   → direct PIX payment, Brazil (BRL) only.
+ *   Mercado Pago does NOT allow this on sandbox/test credentials — it
+ *   always requires a real, production merchant account with the Payments
+ *   API scope enabled; this method throws immediately against a sandbox
+ *   account instead of letting the API fail with a confusing 401.
+ * - in-store dynamic QR      → when a POS is configured (`qrPos` option).
  * - webhooks   → `x-signature` (ts/v1 HMAC-SHA256) verification and parsing.
  * - payouts    → optional, via the money transfer endpoint when enabled on
  *                the account.
+ *
+ * `createCharge` (the generic {@link PaymentProvider} interface method used
+ * by `CosmosRamp`) still exists and dispatches to the method above that
+ * matches `request.method` — use it when you're going through `CosmosRamp`;
+ * call `createPaymentLink`/`createPixCharge` directly when you're only
+ * using this provider on its own.
  *
  * MULTI-ACCOUNT: Mercado Pago issues a SEPARATE merchant account (and access
  * token) per country — an Argentina token cannot process a Brazil/PIX
@@ -103,6 +118,12 @@ export interface MercadoPagoAccountCredentials {
    */
   baseUrl?: string;
 }
+
+/** Request for {@link MercadoPagoProvider.createPaymentLink} — same as {@link CreateChargeRequest} minus `method`, which is always `"link"`. */
+export type MercadoPagoPaymentLinkRequest = Omit<CreateChargeRequest, "method">;
+
+/** Request for {@link MercadoPagoProvider.createPixCharge} — same as {@link CreateChargeRequest} minus `method` (always `"qr"`) and `currency` (always `"BRL"`). */
+export type MercadoPagoPixChargeRequest = Omit<CreateChargeRequest, "method" | "currency">;
 
 export interface MercadoPagoProviderOptions extends Partial<MercadoPagoAccountCredentials> {
   /** Provider name used to select it on each `ramp.onramp/offramp` call. Default: `"mercadopago"`. */
@@ -237,6 +258,40 @@ export class MercadoPagoProvider implements PaymentProvider {
 
   #pickMethod(request: CreateChargeRequest, account: ResolvedAccount): "qr" | "link" {
     return request.currency.toUpperCase() === FiatCurrency.BRL || account.qrPos ? "qr" : "link";
+  }
+
+  /**
+   * Checkout Pro payment link (`init_point`/`sandbox_init_point`). Works in
+   * every market this provider supports, and is the method to use for
+   * sandbox/test-credential runs — unlike {@link createPixCharge}, Mercado
+   * Pago serves this one on test accounts too.
+   */
+  async createPaymentLink(request: MercadoPagoPaymentLinkRequest): Promise<Charge> {
+    const account = this.#accountFor(request.currency);
+    return this.#createPreferenceCharge({ ...request, method: "link" }, account);
+  }
+
+  /**
+   * PIX payment, Brazil (BRL) only — direct `POST /v1/payments` charge with
+   * `payment_method_id: "pix"`.
+   *
+   * Mercado Pago does not support PIX on sandbox/test accounts: the
+   * Payments API scope it needs is only granted to real, production
+   * merchant accounts. This throws immediately when the resolved BRL
+   * account is in sandbox mode, instead of letting the request fail with a
+   * confusing "Unauthorized use of live credentials" 401 — use {@link
+   * createPaymentLink} to test the BRL rail in sandbox instead.
+   */
+  async createPixCharge(request: MercadoPagoPixChargeRequest): Promise<Charge> {
+    const account = this.#accountFor(FiatCurrency.BRL);
+    if (account.sandbox) {
+      throw new ProviderError(
+        this.name,
+        "PIX is not available on Mercado Pago sandbox/test accounts — it requires a production account with the " +
+          "Payments API scope enabled. Use createPaymentLink() to test the BRL rail in sandbox instead.",
+      );
+    }
+    return this.#createPixCharge({ ...request, currency: FiatCurrency.BRL, method: "qr" }, account);
   }
 
   /** Checkout Pro preference → hosted payment link (`init_point`). */

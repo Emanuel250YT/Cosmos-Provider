@@ -8,16 +8,16 @@ import { BaseManager } from "@/organisms/BaseManager";
 
 export class QuoteManager extends BaseManager {
   /**
-   * Solicita una cotización. `quoteId` se genera automáticamente y
-   * `customerId` cae al `defaultCustomerId` del cliente si se omite.
+   * Requests a quote. `quoteId` is generated automatically, and
+   * `customerId` falls back to the client's `defaultCustomerId` if omitted.
    *
-   * Nota: las quotes expiran a los 2 minutos (`quote.isExpired`).
+   * Note: quotes expire after 2 minutes (`quote.isExpired`).
    */
   async create(options: CreateQuoteOptions): Promise<Quote> {
     const customerId = options.customerId ?? this.client.options.defaultCustomerId;
     if (!customerId) {
       throw new EtherfuseError(
-        "Falta customerId: pásalo en las opciones o configura defaultCustomerId al crear el cliente.",
+        "Missing customerId: pass it in the options or set defaultCustomerId when creating the client.",
       );
     }
     const raw = await this.rest.post<APIQuote>(Routes.quote(), {

@@ -1,31 +1,31 @@
-/** Molecule: Wallet — dirección on-chain registrada. */
+/** Molecule: Wallet — a registered on-chain address. */
 
 import type { Blockchain } from "@/atoms/constants";
 import type { APIWallet } from "@/types/index";
 import { Base } from "@/molecules/Base";
 
 export class Wallet extends Base<APIWallet> {
-  /** Id interno de Etherfuse para esta wallet (no es la dirección on-chain). */
+  /** Etherfuse's internal id for this wallet (not the on-chain address). */
   get id(): string {
     return this.raw.walletId;
   }
 
-  /** Dirección/clave pública on-chain, cuando la API la informa. */
+  /** On-chain address/public key, when the API reports it. */
   get publicKey(): string | undefined {
     return this.raw.publicKey;
   }
 
-  /** Red sobre la que vive esta wallet (Solana, Stellar, Base, Polygon...). */
+  /** Network this wallet lives on (Solana, Stellar, Base, Polygon...). */
   get blockchain(): Blockchain | undefined {
     return this.raw.blockchain;
   }
 
-  /** Vuelve a pedir esta wallet a la API para obtener su estado más reciente. */
+  /** Re-fetches this wallet from the API to get its latest status. */
   fetch(): Promise<Wallet> {
     return this.client.wallets.fetch(this.id);
   }
 
-  /** Elimina el registro de esta wallet en Etherfuse (no afecta la cuenta on-chain). */
+  /** Deletes this wallet's registration in Etherfuse (doesn't affect the on-chain account). */
   delete(): Promise<unknown> {
     return this.client.wallets.delete(this.id);
   }

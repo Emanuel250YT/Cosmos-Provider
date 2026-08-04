@@ -1,6 +1,6 @@
 /**
- * LookupClient: cliente público SIN API key, seguro para el navegador.
- * Solo expone la Lookup API (/lookup/*) de Etherfuse.
+ * LookupClient: public client with NO API key, safe for the browser.
+ * Only exposes Etherfuse's Lookup API (/lookup/*).
  *
  * ```ts
  * const lookup = new LookupClient();
@@ -14,20 +14,20 @@ import { Routes, type Environment } from "@/atoms/constants";
 import type { ExchangeRatePair, ExchangeRates } from "@/types/index";
 
 export interface LookupClientOptions {
-  /** `sandbox` o `production` (default). Ambos sirven la misma Lookup API pública. */
+  /** `sandbox` or `production` (default). Both serve the same public Lookup API. */
   environment?: Environment;
-  /** Anula la URL base (p. ej. para un proxy propio). */
+  /** Overrides the base URL (e.g. for a custom proxy). */
   baseUrl?: string;
-  /** Implementación de fetch (default: global — necesario para SSR o entornos sin fetch nativo). */
+  /** Fetch implementation (default: global — needed for SSR or environments without native fetch). */
   fetch?: typeof fetch;
-  /** Timeout HTTP por intento en ms. */
+  /** HTTP timeout per attempt, in ms. */
   timeoutMs?: number;
-  /** Reintentos HTTP ante errores transitorios (424/429/5xx). */
+  /** HTTP retries on transient errors (424/429/5xx). */
   retries?: number;
 }
 
 export class LookupClient {
-  /** Capa HTTP de bajo nivel, por si hace falta pegarle a un endpoint de Lookup aún no tipado. */
+  /** Low-level HTTP layer, in case you need to hit a Lookup endpoint that isn't typed yet. */
   readonly rest: REST;
 
   constructor(options: LookupClientOptions = {}) {
@@ -41,8 +41,8 @@ export class LookupClient {
   }
 
   /**
-   * Tipos de cambio actuales (claves tipo `usd_to_brl`, `usd_to_mxn`).
-   * @param maxAgeSeconds Excluye fuentes más viejas que este umbral.
+   * Current exchange rates (keys like `usd_to_brl`, `usd_to_mxn`).
+   * @param maxAgeSeconds Excludes sources older than this threshold.
    */
   exchangeRates(maxAgeSeconds?: number): Promise<ExchangeRates> {
     return this.rest.get<ExchangeRates>(Routes.lookupExchangeRate(), {
@@ -51,29 +51,29 @@ export class LookupClient {
     });
   }
 
-  /** Atajo: el par USD→BRL. */
+  /** Shortcut: the USD→BRL pair. */
   async usdToBrl(maxAgeSeconds?: number): Promise<ExchangeRatePair | undefined> {
     const rates = await this.exchangeRates(maxAgeSeconds);
     return rates["usd_to_brl"];
   }
 
-  /** Atajo: el par USD→MXN. */
+  /** Shortcut: the USD→MXN pair. */
   async usdToMxn(maxAgeSeconds?: number): Promise<ExchangeRatePair | undefined> {
     const rates = await this.exchangeRates(maxAgeSeconds);
     return rates["usd_to_mxn"];
   }
 
-  /** Catálogo de stablebonds disponibles. */
+  /** Catalog of available stablebonds. */
   stablebonds(): Promise<unknown> {
     return this.rest.get(Routes.lookupStablebonds(), { auth: false });
   }
 
-  /** Códigos de país soportados por Etherfuse. */
+  /** Country codes supported by Etherfuse. */
   countryCodes(): Promise<unknown> {
     return this.rest.get(Routes.lookupCountryCodes(), { auth: false });
   }
 
-  /** Países restringidos (no operables) para el ramp. */
+  /** Restricted (non-operable) countries for the ramp. */
   restrictedCountries(): Promise<unknown> {
     return this.rest.get(Routes.lookupRestrictedCountries(), { auth: false });
   }

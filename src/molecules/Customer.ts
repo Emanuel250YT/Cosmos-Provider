@@ -1,4 +1,4 @@
-/** Molecule: Customer — organización o cliente hijo. */
+/** Molecule: Customer — an organization or child customer. */
 
 import type { APICustomer, CreateBankAccountPayload, RegisterWalletOptions } from "@/types/index";
 import type { BankAccount } from "@/molecules/BankAccount";
@@ -7,31 +7,31 @@ import { Base } from "@/molecules/Base";
 
 export class Customer extends Base<APICustomer> {
   get id(): string {
-    // /ramp/me devuelve `id`; el resto de endpoints usan `customerId`.
+    // /ramp/me returns `id`; every other endpoint uses `customerId`.
     return this.raw.customerId ?? (this.raw.id as string);
   }
 
-  /** Nombre para mostrar de la organización/cliente, cuando la API lo informa. */
+  /** Display name of the organization/customer, when the API reports it. */
   get displayName(): string | undefined {
     return this.raw.displayName;
   }
 
-  /** Registra una cuenta bancaria (PIX o CLABE) para este customer. */
+  /** Registers a bank account (PIX or CLABE) for this customer. */
   createBankAccount(payload: CreateBankAccountPayload): Promise<BankAccount> {
     return this.client.bankAccounts.create(this.id, payload);
   }
 
-  /** Registra una wallet on-chain para este customer. */
+  /** Registers an on-chain wallet for this customer. */
   registerWallet(options: RegisterWalletOptions): Promise<Wallet> {
     return this.client.wallets.registerForCustomer(this.id, options);
   }
 
-  /** Lista las cuentas bancarias del customer. */
+  /** Lists the customer's bank accounts. */
   fetchBankAccounts(): Promise<BankAccount[]> {
     return this.client.bankAccounts.listForCustomer(this.id);
   }
 
-  /** Lista las wallets del customer. */
+  /** Lists the customer's wallets. */
   fetchWallets(): Promise<Wallet[]> {
     return this.client.wallets.listForCustomer(this.id);
   }

@@ -1,6 +1,6 @@
 /**
- * Atom: CRC16-CCITT (polinomio 0x1021, init 0xFFFF), requerido por el
- * estándar EMV® QRCPS que usa PIX para el campo 63 del BR Code.
+ * Atom: CRC16-CCITT (polynomial 0x1021, init 0xFFFF), required by the
+ * EMV® QRCPS standard that PIX uses for field 63 of the BR Code.
  */
 export function crc16ccitt(payload: string): string {
   let crc = 0xffff;

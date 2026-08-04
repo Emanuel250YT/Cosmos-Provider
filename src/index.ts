@@ -38,7 +38,12 @@ export type { CoinGeckoOracleOptions } from "@/oracles/CoinGeckoOracle";
 
 // Payment providers
 export { MercadoPagoProvider } from "@/providers/mercadopago/MercadoPagoProvider";
-export type { MercadoPagoProviderOptions } from "@/providers/mercadopago/MercadoPagoProvider";
+export type {
+  MercadoPagoProviderOptions,
+  MercadoPagoAccountCredentials,
+  MercadoPagoPaymentLinkRequest,
+  MercadoPagoPixChargeRequest,
+} from "@/providers/mercadopago/MercadoPagoProvider";
 export {
   CustomProvider,
   createCustomProvider,

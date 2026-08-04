@@ -1,12 +1,12 @@
 /**
- * E2E contra el sandbox real de Etherfuse.
+ * E2E against the real Etherfuse sandbox.
  *
- * Solo corre si hay una API key de sandbox disponible:
- *   - variable de entorno ETHERFUSE_API_KEY, o
- *   - archivo .env en la raíz con ETHERFUSE_API_KEY=...
+ * Only runs if a sandbox API key is available:
+ *   - ETHERFUSE_API_KEY environment variable, or
+ *   - a .env file at the root with ETHERFUSE_API_KEY=...
  *
- * Ejecutar: npm run test:e2e
- * (sin key, la suite entera se marca como skipped)
+ * Run: npm run test:e2e
+ * (without a key, the entire suite is marked as skipped)
  */
 
 import "dotenv/config";
@@ -17,8 +17,8 @@ import { EtherfuseAPIError } from "@/atoms/errors";
 
 const API_KEY = process.env.ETHERFUSE_API_KEY;
 
-describe("Lookup público (sin API key, producción real)", () => {
-  it("devuelve tipos de cambio con USD→BRL y USD→MXN", async () => {
+describe("Public lookup (no API key, real production)", () => {
+  it("returns exchange rates with USD→BRL and USD→MXN", async () => {
     const lookup = new LookupClient();
     const rates = await lookup.exchangeRates();
     expect(Number(rates["usd_to_brl"]?.rate)).toBeGreaterThan(0);
@@ -26,16 +26,16 @@ describe("Lookup público (sin API key, producción real)", () => {
   });
 });
 
-describe.skipIf(!API_KEY)("Sandbox autenticado (requiere ETHERFUSE_API_KEY)", () => {
+describe.skipIf(!API_KEY)("Authenticated sandbox (requires ETHERFUSE_API_KEY)", () => {
   const client = new EtherfuseClient({ apiKey: API_KEY!, environment: "sandbox" });
 
-  it("GET /ramp/me devuelve la organización", async () => {
+  it("GET /ramp/me returns the organization", async () => {
     const me = await client.customers.me();
     expect(me.id).toBeTruthy();
   });
 
   it.skipIf(!process.env.ETHERFUSE_WALLET)(
-    "lista los assets soportados en Stellar para BRL",
+    "lists the assets supported on Stellar for BRL",
     async () => {
       const assets = await client.assets.list({
         blockchain: "stellar",
@@ -46,7 +46,7 @@ describe.skipIf(!API_KEY)("Sandbox autenticado (requiere ETHERFUSE_API_KEY)", ()
     },
   );
 
-  it("cotiza un onramp BRL → token (o reporta que el par no está disponible)", async () => {
+  it("quotes an onramp BRL → token (or reports that the pair is unavailable)", async () => {
     const me = await client.customers.me();
     const blockchain = (process.env.ETHERFUSE_BLOCKCHAIN ?? "stellar") as never;
     const targetAsset =
@@ -62,16 +62,16 @@ describe.skipIf(!API_KEY)("Sandbox autenticado (requiere ETHERFUSE_API_KEY)", ()
       expect(Number(quote.destinationAmount)).toBeGreaterThan(0);
       expect(quote.isExpired).toBe(false);
     } catch (error) {
-      // Par no soportado para esta org/blockchain: no es un fallo de la librería.
+      // Pair not supported for this org/blockchain: not a library failure.
       if (error instanceof EtherfuseAPIError && [400, 404, 424].includes(error.status)) {
-        console.warn(`Par BRL no disponible en esta cuenta sandbox (HTTP ${error.status}).`);
+        console.warn(`BRL pair not available on this sandbox account (HTTP ${error.status}).`);
         return;
       }
       throw error;
     }
   });
 
-  it("lista órdenes existentes", async () => {
+  it("lists existing orders", async () => {
     const page = await client.orders.list({ pageSize: 5 });
     expect(Array.isArray(page.items)).toBe(true);
   });

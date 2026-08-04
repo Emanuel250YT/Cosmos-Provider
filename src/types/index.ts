@@ -1,8 +1,8 @@
 /**
- * Tipos de payloads de la API de Etherfuse.
+ * Payload types for the Etherfuse API.
  *
- * Todos los objetos crudos aceptan campos extra (`[key: string]: unknown`)
- * para que la librería no se rompa cuando la API añada campos nuevos.
+ * All raw objects accept extra fields (`[key: string]: unknown`) so the
+ * library doesn't break when the API adds new fields.
  */
 
 import type {
@@ -14,7 +14,7 @@ import type {
 } from "@/atoms/constants";
 
 // ---------------------------------------------------------------------------
-// Paginación
+// Pagination
 // ---------------------------------------------------------------------------
 
 export interface Page<T> {
@@ -42,17 +42,17 @@ export type QuoteAssets =
   | { type: "swap"; sourceAsset: string; targetAsset: string };
 
 export interface CreateQuoteOptions {
-  /** Se genera automáticamente si se omite. */
+  /** Generated automatically if omitted. */
   quoteId?: string;
-  /** UUID de la organización o de un customer hijo. Si se omite, se usa el customer por defecto del cliente. */
+  /** UUID of the organization or a child customer. If omitted, the client's default customer is used. */
   customerId?: string;
   blockchain: Blockchain;
-  /** Monto a convertir, como string decimal (p. ej. "1000"). */
+  /** Amount to convert, as a decimal string (e.g. "1000"). */
   sourceAmount: string;
   quoteAssets: QuoteAssets;
-  /** Override de fee de partner en basis points (0–500). */
+  /** Partner fee override in basis points (0-500). */
   partnerFeeBps?: number;
-  /** Dirección Stellar: habilita chequeo de trustline en onramps. */
+  /** Stellar address: enables trustline checking on onramps. */
   walletAddress?: string;
 }
 
@@ -70,7 +70,7 @@ export interface APIQuote {
   requiresSwap?: boolean;
   createdAt: string;
   updatedAt: string;
-  /** Las quotes expiran a los 2 minutos. */
+  /** Quotes expire after 2 minutes. */
   expiresAt: string;
   [key: string]: unknown;
 }
@@ -80,14 +80,14 @@ export interface APIQuote {
 // ---------------------------------------------------------------------------
 
 export interface CreateOrderOptions {
-  /** Se genera automáticamente si se omite. */
+  /** Generated automatically if omitted. */
   orderId?: string;
   bankAccountId: string;
-  /** Recomendado: fija el precio de una quote previa. */
+  /** Recommended: locks in the price of a prior quote. */
   quoteId?: string;
-  /** Wallet embebida de Etherfuse. */
+  /** Etherfuse embedded wallet. */
   cryptoWalletId?: string;
-  /** Dirección on-chain propia (BYOW). */
+  /** Your own on-chain address (BYOW). */
   publicKey?: string;
   blockchain?: Blockchain;
   direction?: OrderDirection;
@@ -99,14 +99,14 @@ export interface CreateOrderOptions {
   [key: string]: unknown;
 }
 
-/** Instrucciones de depósito normalizadas para onramps (PIX o SPEI). */
+/** Normalized deposit instructions for onramps (PIX or SPEI). */
 export interface DepositInstructions {
   method: "pix" | "spei";
-  /** Monto fiat exacto a depositar. */
+  /** Exact fiat amount to deposit. */
   amount?: string;
-  /** BRL: código PIX "copia e cola" (BR Code EMV) — de aquí sale el QR. */
+  /** BRL: PIX "copia e cola" code (BR Code EMV) — the QR is generated from this. */
   pixCode?: string;
-  /** MXN: CLABE interbancaria a la que transferir. */
+  /** MXN: interbank CLABE to transfer to. */
   clabe?: string;
   bankName?: string;
   accountHolder?: string;
@@ -171,7 +171,7 @@ export interface APICreateOrderResult {
 
 export interface APICustomer {
   customerId?: string;
-  /** `GET /ramp/me` devuelve el UUID como `id` en lugar de `customerId`. */
+  /** `GET /ramp/me` returns the UUID as `id` instead of `customerId`. */
   id?: string;
   displayName?: string;
   createdAt?: string;
@@ -184,7 +184,7 @@ export interface APICustomer {
 // ---------------------------------------------------------------------------
 
 export interface CreatePixPersonalAccount {
-  /** UUID de idempotencia; se genera si se omite. */
+  /** Idempotency UUID; generated if omitted. */
   transactionId?: string;
   firstName: string;
   lastName: string;
@@ -296,7 +296,7 @@ export interface ExchangeRatePair {
   [key: string]: unknown;
 }
 
-/** Respuesta de GET /lookup/exchange_rate: claves tipo "usd_to_brl". */
+/** Response from GET /lookup/exchange_rate: keys like "usd_to_brl". */
 export type ExchangeRates = Record<string, ExchangeRatePair>;
 
 // ---------------------------------------------------------------------------
@@ -311,7 +311,7 @@ export interface CreateWebhookOptions {
 export interface APIWebhook {
   webhookId?: string;
   url?: string;
-  /** Secreto HMAC en base64 — solo se devuelve una vez, al crear el webhook. */
+  /** HMAC secret in base64 — only returned once, when the webhook is created. */
   secret?: string;
   createdAt?: string;
   [key: string]: unknown;

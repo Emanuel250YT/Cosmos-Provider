@@ -1,40 +1,40 @@
-/** Molecule: BankAccount — cuenta de liquidación PIX (BRL) o CLABE (MXN). */
+/** Molecule: BankAccount — a PIX (BRL) or CLABE (MXN) settlement account. */
 
 import type { APIBankAccount } from "@/types/index";
 import { Base } from "@/molecules/Base";
 
 export class BankAccount extends Base<APIBankAccount> {
-  /** Id de esta cuenta bancaria en Etherfuse. */
+  /** This bank account's id in Etherfuse. */
   get id(): string {
     return this.raw.bankAccountId;
   }
 
-  /** Id del customer dueño de la cuenta. */
+  /** Id of the customer who owns the account. */
   get customerId(): string {
     return this.raw.customerId;
   }
 
-  /** Moneda de liquidación ("BRL", "MXN"...). */
+  /** Settlement currency ("BRL", "MXN"...). */
   get currency(): string {
     return this.raw.currency;
   }
 
-  /** `true` si es una cuenta brasileña liquidada por PIX. La API devuelve la moneda en minúsculas. */
+  /** `true` if this is a Brazilian account settled via PIX. The API returns the currency lowercased. */
   get isPix(): boolean {
     return this.currency?.toUpperCase() === "BRL";
   }
 
-  /** `true` si es una cuenta mexicana liquidada por SPEI. */
+  /** `true` if this is a Mexican account settled via SPEI. */
   get isSpei(): boolean {
     return this.currency?.toUpperCase() === "MXN";
   }
 
-  /** `true` si la cuenta puede usarse para transaccionar. */
+  /** `true` if the account can be used to transact. */
   get compliant(): boolean {
     return this.raw.compliant === true;
   }
 
-  /** Vuelve a pedir esta cuenta a la API para obtener su estado más reciente (p. ej. `compliant`). */
+  /** Re-fetches this account from the API to get its latest status (e.g. `compliant`). */
   fetch(): Promise<BankAccount> {
     return this.client.bankAccounts.fetch(this.id);
   }

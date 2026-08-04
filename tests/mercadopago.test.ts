@@ -225,6 +225,54 @@ describe("MercadoPagoProvider charges", () => {
   });
 });
 
+describe("MercadoPagoProvider.createPaymentLink / createPixCharge", () => {
+  it("createPaymentLink builds a Checkout Pro preference directly", async () => {
+    const { fetchImpl, requests } = createMockFetch([
+      { route: "POST /checkout/preferences", response: { id: "pref-link", init_point: "https://mp.example/link" } },
+    ]);
+
+    const charge = await provider(fetchImpl).createPaymentLink({
+      amount: 5000,
+      currency: "ARS",
+      reference: "order-link-1",
+      description: "Buy USDC",
+    });
+
+    expect(charge).toMatchObject({ id: "pref-link", method: "link", link: "https://mp.example/link" });
+    expect(requests[0]!.headers["authorization"]).toBe("Bearer TEST-token");
+  });
+
+  it("createPixCharge builds a direct PIX payment on a production BRL account", async () => {
+    const { fetchImpl, requests } = createMockFetch([
+      {
+        route: "POST /v1/payments",
+        response: { id: 321, point_of_interaction: { transaction_data: { qr_code: "00020126...PIX" } } },
+      },
+    ]);
+    const mp = new MercadoPagoProvider({
+      accounts: { BRL: { accessToken: "APP_USR-br-token", sandbox: false, defaultPayerEmail: "buyer@example.com.br" } },
+      fetch: fetchImpl,
+    });
+
+    const charge = await mp.createPixCharge({ amount: 50, reference: "order-pix-1" });
+
+    expect(charge).toMatchObject({ id: "321", method: "qr", qr: "00020126...PIX" });
+    expect(requests[0]!.headers["authorization"]).toBe("Bearer APP_USR-br-token");
+  });
+
+  it("createPixCharge refuses to run against a sandbox BRL account", async () => {
+    const { fetchImpl } = createMockFetch([]);
+    const mp = new MercadoPagoProvider({
+      accounts: { BRL: { accessToken: "TEST-br-token", defaultPayerEmail: "buyer@example.com.br" } },
+      fetch: fetchImpl,
+    });
+
+    await expect(mp.createPixCharge({ amount: 50, reference: "order-pix-2" })).rejects.toThrow(
+      /not available on Mercado Pago sandbox/i,
+    );
+  });
+});
+
 describe("MercadoPagoProvider webhooks", () => {
   const SECRET = "super-secret";
 
@@ -427,9 +475,9 @@ describe("MercadoPagoProvider multi-account (per-country credentials)", () => {
     expect(brOrder.charge?.qr).toBe("00020126...BR");
     expect(brRequests[0]!.headers["authorization"]).toBe("Bearer TEST-br-token");
 
-    // Cada instancia solo acepta la moneda de su propio mercado — pedirle a
-    // la de Argentina que cobre en reales es un error claro, no un 401
-    // confuso de la API real.
+    // Each instance only accepts its own market's currency — asking the AR
+    // one to charge in reais is a clear error, not a confusing 401 from the
+    // real API.
     await expect(
       ramp.onramp({ provider: "mercadopago-ar", amount: 100, currency: "BRL", method: "qr" }),
     ).rejects.toThrow(/does not support BRL/);
