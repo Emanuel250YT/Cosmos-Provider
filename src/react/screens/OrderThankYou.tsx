@@ -1,4 +1,5 @@
 import { screenCardStyle } from "./shared";
+import { t, type Locale } from "../i18n";
 
 export interface OrderThankYouProps {
   customerFirstName: string;
@@ -12,16 +13,18 @@ export interface OrderThankYouProps {
   onBack?: () => void;
   onDownload?: () => void;
   onBackToHome?: () => void;
+  locale?: Locale;
 }
 
 /** Order confirmation with a details breakdown and a support contact line. */
 export function OrderThankYou({
+  locale = "en",
   customerFirstName,
   orderNumber,
   orderDate,
   totalItems,
   price,
-  shipping = "FREE",
+  shipping = t(locale, "free"),
   totalPrice,
   supportPhone,
   onBack,
@@ -31,10 +34,10 @@ export function OrderThankYou({
   return (
     <div style={{ ...screenCardStyle, fontFamily: "Helvetica, Arial, sans-serif", background: "#F4F6F5", borderRadius: 24, padding: 20, color: "#111827" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <button type="button" onClick={onBack} aria-label="Back" style={{ background: "none", border: "none", fontSize: 18, cursor: onBack ? "pointer" : "default" }}>
+        <button type="button" onClick={onBack} aria-label={t(locale, "back")} style={{ background: "none", border: "none", fontSize: 18, cursor: onBack ? "pointer" : "default" }}>
           ←
         </button>
-        <button type="button" onClick={onDownload} aria-label="Download" style={{ background: "none", border: "none", fontSize: 18, cursor: onDownload ? "pointer" : "default" }}>
+        <button type="button" onClick={onDownload} aria-label={t(locale, "download")} style={{ background: "none", border: "none", fontSize: 18, cursor: onDownload ? "pointer" : "default" }}>
           ↓
         </button>
       </div>
@@ -60,24 +63,24 @@ export function OrderThankYou({
             </div>
           </div>
         </div>
-        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 16 }}>Thank you, {customerFirstName}!</div>
-        <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 4 }}>Your order has been processed successfully!</div>
+        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 16 }}>{t(locale, "thankYou", { name: customerFirstName })}</div>
+        <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 4 }}>{t(locale, "orderProcessed")}</div>
       </div>
 
       <div style={{ background: "#fff", borderRadius: 16, padding: 20, marginTop: 20 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>Order details</div>
-        <Row label="Number order" value={orderNumber} />
-        <Row label="Order date" value={orderDate} />
-        <Row label="Total items" value={totalItems} />
-        <div style={{ fontSize: 15, fontWeight: 700, marginTop: 14, marginBottom: 6 }}>Details</div>
-        <Row label="Price" value={price} />
-        <Row label="Shipping" value={shipping} />
-        <Row label="Total Price" value={totalPrice} />
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>{t(locale, "orderDetails")}</div>
+        <Row label={t(locale, "numberOrder")} value={orderNumber} />
+        <Row label={t(locale, "orderDate")} value={orderDate} />
+        <Row label={t(locale, "totalItems")} value={totalItems} />
+        <div style={{ fontSize: 15, fontWeight: 700, marginTop: 14, marginBottom: 6 }}>{t(locale, "details")}</div>
+        <Row label={t(locale, "price")} value={price} />
+        <Row label={t(locale, "shipping")} value={shipping} />
+        <Row label={t(locale, "totalPrice")} value={totalPrice} />
       </div>
 
       {supportPhone ? (
         <div style={{ fontSize: 12, color: "#6B7280", marginTop: 16, lineHeight: 1.5 }}>
-          Note: if you need help please contact customer service{" "}
+          {t(locale, "supportNote")}{" "}
           <a href={`tel:${supportPhone}`} style={{ color: "#0D9488", textDecoration: "underline" }}>
             {supportPhone}
           </a>
@@ -89,7 +92,7 @@ export function OrderThankYou({
         onClick={onBackToHome}
         style={{ width: "100%", background: "#8FC7BC", border: "none", borderRadius: 16, padding: 16, fontSize: 15, fontWeight: 700, color: "#fff", marginTop: 20, cursor: "pointer" }}
       >
-        Back to Home
+        {t(locale, "backToHome")}
       </button>
     </div>
   );

@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 export interface PaymentMethodCardProps {
   iconLabel: string;
   iconBg: string;
+  /** Logo image URL — shown instead of the `iconLabel` initials when set. */
+  logoUrl?: string;
   title: string;
   subtitle: string;
   selected?: boolean;
@@ -13,10 +15,11 @@ export interface PaymentMethodCardProps {
   onSelect?: () => void;
 }
 
-/** A selectable payment/withdraw method card (radio row + icon badge). */
+/** A selectable payment/withdraw method card (radio row + icon badge, optionally a provider logo). */
 export function PaymentMethodCard({
   iconLabel,
   iconBg,
+  logoUrl,
   title,
   subtitle,
   selected = false,
@@ -47,7 +50,8 @@ export function PaymentMethodCard({
               width: 40,
               height: 40,
               borderRadius: "50%",
-              background: iconBg,
+              background: logoUrl ? "#fff" : iconBg,
+              border: logoUrl ? "1px solid #E5E7EB" : undefined,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -55,9 +59,10 @@ export function PaymentMethodCard({
               fontWeight: 700,
               fontSize: 13,
               flexShrink: 0,
+              overflow: "hidden",
             }}
           >
-            {iconLabel}
+            {logoUrl ? <img src={logoUrl} alt={title} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : iconLabel}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <span style={{ fontSize: 15, fontWeight: 600, color: "#111827" }}>{title}</span>

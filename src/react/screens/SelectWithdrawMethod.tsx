@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { PaymentMethodCard, type PaymentMethodCardProps } from "../primitives/PaymentMethodCard";
 import { screenCardStyle } from "./shared";
+import { t, type Locale } from "../i18n";
 
 export interface WithdrawMethodOption extends PaymentMethodCardProps {
   /** Stable key for the list; falls back to `title` if omitted. */
@@ -15,14 +16,16 @@ export interface SelectWithdrawMethodProps {
   cryptoSectionLabel?: string;
   methods: WithdrawMethodOption[];
   onBack?: () => void;
+  locale?: Locale;
 }
 
 /** Method picker for withdrawing funds, grouped into cash and crypto rails. */
 export function SelectWithdrawMethod({
-  title = "Select Method",
+  locale = "en",
+  title = t(locale, "selectMethod"),
   subtitle,
-  cashSectionLabel = "Cash Payment",
-  cryptoSectionLabel = "Crypto Payment",
+  cashSectionLabel = t(locale, "cashPayment"),
+  cryptoSectionLabel = t(locale, "cryptoPayment"),
   methods,
   onBack,
 }: SelectWithdrawMethodProps) {
@@ -34,7 +37,7 @@ export function SelectWithdrawMethod({
       <button
         type="button"
         onClick={onBack}
-        aria-label="Back"
+        aria-label={t(locale, "back")}
         style={{ width: 36, height: 36, borderRadius: "50%", background: "#fff", border: "none", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, marginBottom: 24, cursor: onBack ? "pointer" : "default" }}
       >
         ←

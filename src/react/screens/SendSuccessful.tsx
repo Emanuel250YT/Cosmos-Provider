@@ -1,17 +1,20 @@
 import { screenCardStyle } from "./shared";
+import { t, type Locale } from "../i18n";
 
 export interface SendSuccessfulProps {
   title?: string;
   message?: string;
   doneLabel?: string;
   onDone?: () => void;
+  locale?: Locale;
 }
 
 /** A simple full-bleed success state for a completed send. */
 export function SendSuccessful({
-  title = "Send Successful",
-  message = "Your payment has been sent successfully and the transaction is now complete.",
-  doneLabel = "Done",
+  locale = "en",
+  title = t(locale, "sendSuccessful"),
+  message = t(locale, "sendSuccessMessage"),
+  doneLabel = t(locale, "done"),
   onDone,
 }: SendSuccessfulProps) {
   return (

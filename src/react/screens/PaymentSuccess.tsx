@@ -1,4 +1,5 @@
 import { screenCardStyle } from "./shared";
+import { t, type Locale } from "../i18n";
 
 export interface PaymentSuccessProps {
   amountPaid: string;
@@ -15,10 +16,12 @@ export interface PaymentSuccessProps {
   time: string;
   paymentTotal: string;
   onDone?: () => void;
+  locale?: Locale;
 }
 
 /** Full "payment successful" receipt with an optional cashback callout. */
 export function PaymentSuccess({
+  locale = "en",
   amountPaid,
   merchantInitials,
   merchantName,
@@ -40,7 +43,7 @@ export function PaymentSuccess({
         <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#16A34A", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <span style={{ color: "#fff", fontSize: 22, fontWeight: 700 }}>✓</span>
         </div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#0D9488", marginTop: 10 }}>Payment Successful</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "#0D9488", marginTop: 10 }}>{t(locale, "paymentSuccessful")}</div>
         <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{amountPaid}</div>
       </div>
 
@@ -65,19 +68,19 @@ export function PaymentSuccess({
           <div style={{ fontSize: 16, fontWeight: 700, marginTop: 10, textAlign: "center" }}>{merchantName}</div>
         </div>
         <div style={{ paddingTop: 14, display: "flex", flexDirection: "column", gap: 4 }}>
-          <Row label="Total Payment" value={totalPayment} />
+          <Row label={t(locale, "totalPayment")} value={totalPayment} />
           <Row label={taxLabel} value={taxAmount} />
           {cashbackNote ? (
             <div style={{ background: "#DDF3E8", color: "#0D9488", fontSize: 13, fontWeight: 600, borderRadius: 10, padding: "10px 12px", marginTop: 8 }}>{cashbackNote}</div>
           ) : null}
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#111827", marginTop: 14, marginBottom: 6 }}>Transaction details</div>
-          <Row label="Payment Method" value={paymentMethod} />
-          <Row label="Status" value="Success" valueColor="#16A34A" />
-          <Row label="Date" value={date} />
-          <Row label="Time" value={time} />
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#111827", marginTop: 14, marginBottom: 6 }}>{t(locale, "transactionDetails")}</div>
+          <Row label={t(locale, "paymentMethod")} value={paymentMethod} />
+          <Row label={t(locale, "status")} value={t(locale, "success")} valueColor="#16A34A" />
+          <Row label={t(locale, "date")} value={date} />
+          <Row label={t(locale, "time")} value={time} />
           <div style={{ borderTop: "1px dashed #E5E7EB", margin: "10px 0" }} />
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15 }}>
-            <span style={{ fontWeight: 700 }}>Payment Total</span>
+            <span style={{ fontWeight: 700 }}>{t(locale, "paymentTotal")}</span>
             <span style={{ fontWeight: 800 }}>{paymentTotal}</span>
           </div>
         </div>
@@ -88,7 +91,7 @@ export function PaymentSuccess({
         onClick={onDone}
         style={{ width: "100%", background: "#8FC7BC", border: "none", borderRadius: 16, padding: 16, fontSize: 15, fontWeight: 700, color: "#fff", marginTop: 20, cursor: "pointer" }}
       >
-        Done
+        {t(locale, "done")}
       </button>
     </div>
   );

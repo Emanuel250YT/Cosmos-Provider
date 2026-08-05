@@ -1,6 +1,7 @@
 import { QRCode, type QRCodeProps } from "../primitives/QRCode";
 import { DetailRow, type DetailRowProps } from "../primitives/DetailRow";
 import { screenCardStyle } from "./shared";
+import { t, type Locale } from "../i18n";
 
 export interface ReceivePaymentProps {
   title?: string;
@@ -16,20 +17,22 @@ export interface ReceivePaymentProps {
   rows?: DetailRowProps[];
   onCopyCode?: () => void;
   copyLabel?: string;
+  locale?: Locale;
 }
 
 /** "Scan to pay" screen: QR (or payment link), amount, live status, and order details. */
 export function ReceivePayment({
-  title = "Scan to pay",
+  locale = "en",
+  title = t(locale, "scanToPay"),
   amount,
   statusLabel,
   statusColor = "#9CA3AF",
   qr,
   paymentLink,
-  paymentLinkLabel = "Open payment link",
+  paymentLinkLabel = t(locale, "openPaymentLink"),
   rows,
   onCopyCode,
-  copyLabel = "Copy code",
+  copyLabel = t(locale, "copyCode"),
 }: ReceivePaymentProps) {
   return (
     <div style={{ ...screenCardStyle, fontFamily: "Helvetica, Arial, sans-serif", background: "#fff", borderRadius: 24, padding: 20, color: "#111827" }}>

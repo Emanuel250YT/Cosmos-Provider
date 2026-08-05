@@ -1,4 +1,5 @@
 import { screenCardStyle } from "./shared";
+import { t, type Locale } from "../i18n";
 
 export interface TransactionDetailsProps {
   merchantInitials: string;
@@ -14,15 +15,17 @@ export interface TransactionDetailsProps {
   cardLast4: string;
   onBackToHome?: () => void;
   onDownload?: () => void;
+  locale?: Locale;
 }
 
 /** Receipt-style breakdown of a completed transaction. */
 export function TransactionDetails({
+  locale = "en",
   merchantInitials,
   merchantName,
   merchantAccentColor = "#B5384E",
   merchantAccentBg = "#FCE7EC",
-  subtitle = "Online Payment",
+  subtitle = t(locale, "onlinePayment"),
   totalPaid,
   date,
   category,
@@ -35,7 +38,7 @@ export function TransactionDetails({
   return (
     <div style={{ ...screenCardStyle, fontFamily: "Helvetica, Arial, sans-serif", background: "#F4F6F5", borderRadius: 24, padding: 20, color: "#0F3D2E" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", paddingBottom: 12 }}>
-        <span style={{ fontSize: 16, fontWeight: 700, color: "#111827" }}>Transaction details</span>
+        <span style={{ fontSize: 16, fontWeight: 700, color: "#111827" }}>{t(locale, "transactionDetails")}</span>
       </div>
 
       <div style={{ background: "#fff", borderRadius: 16, padding: 20, marginTop: 12 }}>
@@ -58,15 +61,15 @@ export function TransactionDetails({
           </div>
           <div style={{ fontSize: 16, fontWeight: 700, marginTop: 10 }}>{merchantName}</div>
           <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 2 }}>{subtitle}</div>
-          <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 16 }}>Total Paid</div>
+          <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 16 }}>{t(locale, "totalPaid")}</div>
           <div style={{ fontSize: 26, fontWeight: 800, color: "#0D9488", marginTop: 4 }}>{totalPaid}</div>
         </div>
         <div style={{ paddingTop: 16, display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#111827", marginBottom: 6 }}>Transaction details</div>
-          <Row label="Date" value={date} />
-          <Row label="Category" value={category} />
-          <Row label="Order Number" value={orderNumber} />
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginTop: 12, marginBottom: 8 }}>Card holder</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#111827", marginBottom: 6 }}>{t(locale, "transactionDetails")}</div>
+          <Row label={t(locale, "date")} value={date} />
+          <Row label={t(locale, "category")} value={category} />
+          <Row label={t(locale, "orderNumberLabel")} value={orderNumber} />
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginTop: 12, marginBottom: 8 }}>{t(locale, "cardHolder")}</div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#F4F6F5", borderRadius: 12, padding: "10px 14px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div
@@ -100,14 +103,14 @@ export function TransactionDetails({
           onClick={onBackToHome}
           style={{ flex: 1, background: "#fff", border: "1px solid #D1D5DB", borderRadius: 16, padding: 14, fontSize: 14, fontWeight: 700, color: "#111827", cursor: "pointer" }}
         >
-          Back to Home
+          {t(locale, "backToHome")}
         </button>
         <button
           type="button"
           onClick={onDownload}
           style={{ flex: 1, background: "#8FC7BC", border: "none", borderRadius: 16, padding: 14, fontSize: 14, fontWeight: 700, color: "#fff", cursor: "pointer" }}
         >
-          Download
+          {t(locale, "download")}
         </button>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { screenCardStyle } from "./shared";
+import { t, type Locale } from "../i18n";
 
 export interface AddCardFormValues {
   cardHolderName: string;
@@ -14,15 +15,23 @@ export interface AddCardFormProps {
   cardPreviewName?: string;
   onBack?: () => void;
   onSubmit?: (values: AddCardFormValues) => void;
+  locale?: Locale;
 }
 
 /** A "save a card" form with a live card-art preview. */
-export function AddCardForm({ title = "Add Card", defaultValues, cardPreviewName = "Card holder", onBack, onSubmit }: AddCardFormProps) {
+export function AddCardForm({
+  locale = "en",
+  title = t(locale, "addCardTitle"),
+  defaultValues,
+  cardPreviewName = t(locale, "addCardHolderDefault"),
+  onBack,
+  onSubmit,
+}: AddCardFormProps) {
   return (
     <div style={{ ...screenCardStyle, fontFamily: "Helvetica, Arial, sans-serif", background: "#fff", borderRadius: 24, padding: 20, color: "#111827" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         {onBack ? (
-          <button type="button" onClick={onBack} aria-label="Back" style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>
+          <button type="button" onClick={onBack} aria-label={t(locale, "back")} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>
             ←
           </button>
         ) : (
@@ -74,16 +83,16 @@ export function AddCardForm({ title = "Add Card", defaultValues, cardPreviewName
           });
         }}
       >
-        <div style={{ fontSize: 15, fontWeight: 700, marginTop: 24, marginBottom: 14 }}>Credit Card Info</div>
+        <div style={{ fontSize: 15, fontWeight: 700, marginTop: 24, marginBottom: 14 }}>{t(locale, "addCardHeading")}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <Field label="Card Holder Name" name="cardHolderName" defaultValue={defaultValues?.cardHolderName} />
-          <Field label="Card number*" name="cardNumber" defaultValue={defaultValues?.cardNumber} />
+          <Field label={t(locale, "addCardHolderName")} name="cardHolderName" defaultValue={defaultValues?.cardHolderName} />
+          <Field label={t(locale, "addCardNumber")} name="cardNumber" defaultValue={defaultValues?.cardNumber} />
           <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
             <div style={{ flex: "1 1 140px" }}>
-              <Field label="Expiry Date MM/YY*" name="expiryDate" defaultValue={defaultValues?.expiryDate} />
+              <Field label={t(locale, "addCardExpiry")} name="expiryDate" defaultValue={defaultValues?.expiryDate} />
             </div>
             <div style={{ flex: "1 1 140px" }}>
-              <Field label="CVV" name="cvv" defaultValue={defaultValues?.cvv} type="password" />
+              <Field label={t(locale, "addCardCvv")} name="cvv" defaultValue={defaultValues?.cvv} type="password" />
             </div>
           </div>
         </div>
@@ -92,7 +101,7 @@ export function AddCardForm({ title = "Add Card", defaultValues, cardPreviewName
           type="submit"
           style={{ width: "100%", background: "#111827", color: "#fff", border: "none", borderRadius: 16, padding: 16, fontSize: 16, fontWeight: 700, marginTop: 28, cursor: "pointer" }}
         >
-          Save
+          {t(locale, "addCardSave")}
         </button>
       </form>
     </div>

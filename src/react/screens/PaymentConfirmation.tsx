@@ -1,5 +1,6 @@
 import { DetailRow, type DetailRowProps } from "../primitives/DetailRow";
 import { screenCardStyle } from "./shared";
+import { t, type Locale } from "../i18n";
 
 export interface PaymentConfirmationProps {
   itemTitle: string;
@@ -7,15 +8,16 @@ export interface PaymentConfirmationProps {
   /** Rows rendered as `DetailRow`s, in order — e.g. amount, status, bill id, then payment method, date, time, then tax and total. */
   rows: Array<DetailRowProps>;
   onShare?: () => void;
+  locale?: Locale;
 }
 
 /** "Payment success" summary card with a share action. */
-export function PaymentConfirmation({ itemTitle, itemSubtitle, rows, onShare }: PaymentConfirmationProps) {
+export function PaymentConfirmation({ itemTitle, itemSubtitle, rows, onShare, locale = "en" }: PaymentConfirmationProps) {
   return (
     <div style={{ ...screenCardStyle, fontFamily: "Helvetica, Arial, sans-serif", background: "#F7F7F8", borderRadius: 24, paddingBottom: 24, color: "#111827" }}>
       <div style={{ padding: "16px 20px" }}>
-        <div style={{ fontSize: 28, fontWeight: 800, marginTop: 8 }}>Payment Success!</div>
-        <div style={{ fontSize: 14, color: "#6B7280", marginTop: 6 }}>Your payment has been successfully done</div>
+        <div style={{ fontSize: 28, fontWeight: 800, marginTop: 8 }}>{t(locale, "paymentSuccess")}</div>
+        <div style={{ fontSize: 14, color: "#6B7280", marginTop: 6 }}>{t(locale, "paymentDoneMessage")}</div>
 
         <div style={{ background: "#fff", borderRadius: 16, padding: 16, marginTop: 20 }}>
           <div
@@ -68,7 +70,7 @@ export function PaymentConfirmation({ itemTitle, itemSubtitle, rows, onShare }: 
             cursor: "pointer",
           }}
         >
-          Share
+          {t(locale, "share")}
         </button>
       </div>
     </div>

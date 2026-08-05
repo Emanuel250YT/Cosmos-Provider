@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { PaymentOptionRow, type PaymentOptionBadge } from "../primitives/PaymentOptionRow";
 import { CartItemRow, type CartItemRowProps } from "../primitives/CartItemRow";
 import { SummaryRow, type SummaryRowProps } from "../primitives/SummaryRow";
+import { t, type Locale } from "../i18n";
 
 export interface CheckoutOption {
   id: string;
@@ -23,10 +24,12 @@ export interface CheckoutPageProps {
   onPay?: () => void;
   termsAccepted?: boolean;
   onTermsAcceptedChange?: (accepted: boolean) => void;
+  locale?: Locale;
 }
 
 /** Two-column checkout: payment method selection + card cart/summary. */
 export function CheckoutPage({
+  locale = "en",
   brandName,
   onCancelBooking,
   options,
@@ -62,7 +65,7 @@ export function CheckoutPage({
             onClick={onCancelBooking}
             style={{ background: "none", border: "none", fontSize: 14, fontWeight: 600, textDecoration: "underline", color: "#DC2626", cursor: "pointer" }}
           >
-            Cancel Booking
+            {t(locale, "cancelBooking")}
           </button>
         ) : null}
       </div>
@@ -70,8 +73,8 @@ export function CheckoutPage({
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 24, padding: "24px clamp(16px, 4vw, 48px)", alignItems: "start" }}>
         <div style={{ background: "#fff", borderRadius: 16, padding: 32, display: "flex", flexDirection: "column", gap: 16 }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 700 }}>Select Payment Option</div>
-            <div style={{ fontSize: 14, color: "#6B7280", marginTop: 4 }}>All transactions are secure and encrypted</div>
+            <div style={{ fontSize: 20, fontWeight: 700 }}>{t(locale, "selectPaymentOption")}</div>
+            <div style={{ fontSize: 14, color: "#6B7280", marginTop: 4 }}>{t(locale, "secureTransactions")}</div>
           </div>
 
           {options.map((option) =>
@@ -102,20 +105,20 @@ export function CheckoutPage({
           {onTermsAcceptedChange ? (
             <label style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
               <input type="checkbox" checked={!!termsAccepted} onChange={(e) => onTermsAcceptedChange(e.target.checked)} style={{ marginTop: 3 }} />
-              <span style={{ fontSize: 13, color: "#374151" }}>By continuing, I agree to the Terms &amp; Conditions and Privacy Policy</span>
+              <span style={{ fontSize: 13, color: "#374151" }}>{t(locale, "termsNotice")}</span>
             </label>
           ) : null}
         </div>
 
         <div style={{ background: "linear-gradient(135deg,#EEF2FF,#FDF2F8)", border: "1px solid #E5E7EB", borderRadius: 16, padding: 24 }}>
           <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 12 }}>
-            Your cart <span style={{ color: "#4F46E5" }}>({cartItems.length})</span>
+            {t(locale, "yourCart")} <span style={{ color: "#4F46E5" }}>({cartItems.length})</span>
           </div>
           {cartItems.map((item, i) => (
             <CartItemRow key={i} {...item} />
           ))}
           <div style={{ background: "#fff", borderRadius: 10, padding: 18 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>Order summary</div>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>{t(locale, "orderSummary")}</div>
             {summaryRows.map((row, i) => (
               <SummaryRow key={i} {...row} />
             ))}

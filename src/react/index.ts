@@ -8,3 +8,5 @@
 
 export * from "./primitives";
 export * from "./screens";
+export { t, DICTIONARIES } from "./i18n";
+export type { Locale, TranslationKey } from "./i18n";

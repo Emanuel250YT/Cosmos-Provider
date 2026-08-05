@@ -132,6 +132,8 @@ export interface MercadoPagoProviderOptions extends Partial<MercadoPagoAccountCr
   regions?: readonly string[];
   /** Currencies this instance can operate in. Default: all seven Mercado Pago markets. */
   currencies?: readonly string[];
+  /** Optional logo URL, for UIs that list providers (e.g. a payment-method picker). */
+  logoUrl?: string;
   /**
    * Per-currency account overrides, for operating more than one Mercado
    * Pago merchant account from a single provider instance. Key by ISO 4217
@@ -160,6 +162,8 @@ export class MercadoPagoProvider implements PaymentProvider {
   readonly name: string;
   readonly regions: readonly string[];
   readonly currencies: readonly string[];
+  /** Optional logo URL, for UIs that list providers (e.g. a payment-method picker). */
+  readonly logoUrl?: string;
   /** Default API base URL every account falls back to unless it sets its own (see {@link MercadoPagoAccountCredentials.baseUrl}). */
   readonly baseUrl: string;
   /**
@@ -180,6 +184,7 @@ export class MercadoPagoProvider implements PaymentProvider {
     this.name = options.name ?? "mercadopago";
     this.regions = options.regions ?? MP_REGIONS;
     this.currencies = options.currencies ?? MP_CURRENCIES;
+    this.logoUrl = options.logoUrl;
     this.baseUrl = (options.baseUrl ?? MP_BASE_URL).replace(/\/+$/, "");
     this.#fetch = options.fetch ?? globalThis.fetch?.bind(globalThis);
     if (typeof this.#fetch !== "function") {

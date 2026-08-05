@@ -60,6 +60,8 @@ export type {
   CustomAdapters,
   CustomWebhookConfig,
 } from "@/providers/custom/CustomProvider";
+export { EtherfuseProvider } from "@/providers/etherfuse/EtherfuseProvider";
+export type { EtherfuseProviderOptions } from "@/providers/etherfuse/EtherfuseProvider";
 
 // Outgoing webhooks (signed deliveries) + receiver-side verification
 export {
