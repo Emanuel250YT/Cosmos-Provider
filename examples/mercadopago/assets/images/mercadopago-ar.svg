@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <circle cx="32" cy="32" r="32" fill="#00B1EA"/>
-  <circle cx="46" cy="18" r="8" fill="#75AADB"/>
-  <text x="30" y="41" font-size="19" font-family="Helvetica,Arial,sans-serif" font-weight="700" fill="#fff" text-anchor="middle">MP</text>
-</svg>

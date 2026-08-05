@@ -6,7 +6,7 @@
  * components (`PaymentMethodCard`, `PaymentOptionRow`, `ReceivePayment`,
  * `PaymentConfirmation`, `SummaryRow`), server-rendered with
  * `react-dom/server` and fed by the `cosmos-providers/react/server` mappers.
- * Steps animate in/out; the language switch (top-right, flags) and the
+ * Steps animate in/out; the language dropdown (top-right, flags) and the
  * light/dark toggle next to it re-render the wizard's own copy.
  *
  *   npm run demo:ui     (or: npx tsx examples/mercadopago/demo-ui.tsx)
@@ -17,16 +17,15 @@
  * `logoUrl` — reusing `ramp.providers` for the picker means adding a fourth
  * is the only change needed anywhere.
  *
- * Live vs. Simulated (top-left pill): Simulated runs against the Mercado
- * Pago simulator (`examples/helpers/mock-mercadopago`) — safe, deterministic,
- * no external calls. Live uses your real `.env` credentials:
- * - Etherfuse: `ETHERFUSE_API_KEY` is a sandbox key, so Live Etherfuse always
- *   hits Etherfuse's real sandbox — safe either way, no mode-gating needed.
- * - Mercado Pago: Live uses `MP_BR_ACCESS_TOKEN`/`MP_AR_ACCESS_TOKEN`
- *   directly. If `MP_BR_ACCESS_TOKEN` is a PRODUCTION credential (starts
- *   with `APP_USR-`, not `TEST-`), Live Mercado Pago charges are REAL —
- *   scanning/opening one moves real money. `mercadopago-ar` only appears in
- *   Live mode if `MP_AR_ACCESS_TOKEN` is actually set.
+ * The UI always runs against the Mercado Pago simulator
+ * (`examples/helpers/mock-mercadopago`) — safe, deterministic, no external
+ * calls. There is deliberately no runtime Simulated/Live switch in the UI:
+ * which credentials a provider talks to (sandbox vs. production) is a
+ * property of how that provider was constructed (`.env`), not something a
+ * user should be able to flip live. The server-side `mode: "live"` code path
+ * still exists below for anyone hitting `/api/*` directly with real `.env`
+ * credentials — see the actions for details — but nothing in the page wires
+ * it up.
  * Because a local dev server can't receive real inbound webhooks, "confirm"
  * in Live mode polls the provider's real charge status instead of
  * simulating a webhook — it only completes once someone has genuinely paid.
@@ -72,7 +71,7 @@ type Currency = "ARS" | "BRL";
 type Lang = "en" | "es" | "pt";
 type Mode = "simulated" | "live";
 interface WizardState {
-  provider: string;
+  provider: string | null;
   currency: Currency | null;
   method: Method | null;
   amount: number | null;
@@ -121,10 +120,6 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     step: "Step",
     of: "of",
     chooseOperation: "Choose an operation",
-    liveLabel: "Live",
-    simulatedLabel: "Simulated",
-    lightLabel: "Light",
-    darkLabel: "Dark",
   },
   es: {
     opBuy: "Comprar USDC",
@@ -157,10 +152,6 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     step: "Paso",
     of: "de",
     chooseOperation: "Elegí una operación",
-    liveLabel: "Real",
-    simulatedLabel: "Simulado",
-    lightLabel: "Claro",
-    darkLabel: "Nocturno",
   },
   pt: {
     opBuy: "Comprar USDC",
@@ -193,10 +184,6 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     step: "Etapa",
     of: "de",
     chooseOperation: "Escolha uma operação",
-    liveLabel: "Real",
-    simulatedLabel: "Simulado",
-    lightLabel: "Claro",
-    darkLabel: "Escuro",
   },
 };
 const t = (lang: Lang, key: string): string => STRINGS[lang]?.[key] ?? key;
@@ -219,7 +206,7 @@ const methodsForProvider = (providerName: string, currency: Currency): Method[] 
 const require = createRequire(import.meta.url);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FLAGS_DIR = path.join(path.dirname(require.resolve("flag-icons/package.json")), "flags", "4x3");
-const LOGOS_DIR = path.join(HERE, "assets", "images");
+const LOGOS_DIR = path.join(HERE, "..", "..", "src", "react", "images");
 const LANG_FLAG: Record<Lang, string> = { en: "us", es: "es", pt: "br" };
 
 // ---------------------------------------------------------------------------
@@ -308,7 +295,7 @@ const settlementFn: SettlementFn = async ({ order, wallet, amount, asset }) => {
 const etherfuseProvider = new EtherfuseProvider({
   apiKey: process.env.ETHERFUSE_API_KEY ?? "",
   environment: "sandbox",
-  logoUrl: "/assets/logo/etherfuse.svg",
+  logoUrl: "/assets/logo/etherfuse.ico",
 });
 
 const oracle = () => new CoinGeckoOracle({ apiKey: process.env.COINGECKO_API_KEY });
@@ -324,7 +311,7 @@ const rampSimulated = new CosmosRamp({
       webhookSecret: WEBHOOK_SECRET,
       defaultPayerEmail: "buyer@example.com",
       fetch: mp.fetchImpl,
-      logoUrl: "/assets/logo/mercadopago-br.svg",
+      logoUrl: "/assets/logo/mp.svg",
     }),
     new MercadoPagoProvider({
       name: "mercadopago-ar",
@@ -334,7 +321,7 @@ const rampSimulated = new CosmosRamp({
       webhookSecret: WEBHOOK_SECRET,
       defaultPayerEmail: "buyer@example.com",
       fetch: mp.fetchImpl,
-      logoUrl: "/assets/logo/mercadopago-ar.svg",
+      logoUrl: "/assets/logo/mp.svg",
     }),
   ],
   oracle: oracle(),
@@ -351,7 +338,7 @@ if (process.env.MP_BR_ACCESS_TOKEN) {
       accessToken: process.env.MP_BR_ACCESS_TOKEN,
       webhookSecret: process.env.MP_BR_WEBHOOK_SECRET,
       defaultPayerEmail: "buyer@example.com",
-      logoUrl: "/assets/logo/mercadopago-br.svg",
+      logoUrl: "/assets/logo/mp.svg",
     }),
   );
 }
@@ -364,7 +351,7 @@ if (process.env.MP_AR_ACCESS_TOKEN) {
       accessToken: process.env.MP_AR_ACCESS_TOKEN,
       webhookSecret: process.env.MP_AR_WEBHOOK_SECRET,
       defaultPayerEmail: "buyer@example.com",
-      logoUrl: "/assets/logo/mercadopago-ar.svg",
+      logoUrl: "/assets/logo/mp.svg",
     }),
   );
 }
@@ -441,7 +428,7 @@ function renderCurrencyBody(state: WizardState, lang: Lang): string {
 }
 
 function renderMethodBody(state: WizardState, lang: Lang): string {
-  const methods = methodsForProvider(state.provider, state.currency ?? "ARS");
+  const methods = methodsForProvider(state.provider ?? "", state.currency ?? "ARS");
   const rows = methods
     .map((m) => {
       const row = renderToStaticMarkup(
@@ -678,7 +665,7 @@ const actions: Record<string, Action> = {
 // HTTP server
 // ---------------------------------------------------------------------------
 
-const MIME: Record<string, string> = { ".svg": "image/svg+xml" };
+const MIME: Record<string, string> = { ".svg": "image/svg+xml", ".ico": "image/x-icon" };
 
 const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
@@ -714,9 +701,8 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     const stepName = url.searchParams.get("step") || "provider";
     const lang: Lang = STRINGS[url.searchParams.get("lang") as Lang] ? (url.searchParams.get("lang") as Lang) : "en";
     const amountParam = url.searchParams.get("amount");
-    const defaultProvider = providersFor(op, mode)[0]?.name ?? rampFor(mode).providers[0]!.name;
     const state: WizardState = {
-      provider: url.searchParams.get("provider") || defaultProvider,
+      provider: url.searchParams.get("provider") || null,
       currency: url.searchParams.get("currency") === "BRL" ? "BRL" : url.searchParams.get("currency") === "ARS" ? "ARS" : null,
       method: url.searchParams.get("method") === "qr" ? "qr" : url.searchParams.get("method") === "link" ? "link" : null,
       amount: amountParam ? Number(amountParam) : null,
@@ -756,7 +742,6 @@ server.listen(PORT, () => {
 // cosmos-providers/react components, server-rendered per request above)
 // ---------------------------------------------------------------------------
 
-const DEFAULT_PROVIDER = providersFor("buy", "simulated")[0]!.name;
 const INITIAL_PROVIDERS = JSON.stringify(providersFor("buy", "simulated").map((p) => ({ name: p.name, currencies: p.currencies })));
 
 const PAGE = /* html */ `<!doctype html>
@@ -796,20 +781,33 @@ const PAGE = /* html */ `<!doctype html>
   #hint { text-align: center; color: var(--muted); font-size: 12px; margin-top: 16px; }
   #pending-note { text-align: center; color: #B45309; font-size: 12px; margin-top: 8px; }
 
-  /* Top-left: Live/Simulated pill. Top-right: flags + theme toggle. */
-  #mode-switch, #top-right { position: fixed; top: 20px; z-index: 50; display: flex; gap: 8px; align-items: center; }
-  #mode-switch { left: 20px; }
-  #top-right { right: 20px; }
-  .pill { display: flex; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--panel); }
-  .pill button {
-    background: none; border: none; padding: 6px 10px; font-size: 12px; cursor: pointer; font: inherit; color: var(--fg);
+  /* Top-right: language dropdown + theme toggle. */
+  #top-right { position: fixed; top: 20px; right: 20px; z-index: 50; display: flex; gap: 8px; align-items: center; }
+
+  #theme-toggle {
+    width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    padding: 0; font-size: 16px; line-height: 1; border: 1px solid var(--border); background: var(--panel); cursor: pointer;
   }
-  .pill button.active { background: #111827; color: #fff; }
-  .pill button + button { border-left: 1px solid var(--border); }
-  #lang-switch img { width: 20px; height: 15px; display: block; }
-  #lang-switch button { padding: 6px 8px; display: flex; align-items: center; }
-  #theme-toggle { padding: 6px 10px; font-size: 12px; }
-  #live-warning { font-size: 10px; color: #B45309; margin-left: 6px; max-width: 140px; }
+
+  .dropdown { position: relative; }
+  .dropdown-toggle {
+    display: flex; align-items: center; gap: 6px; height: 34px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--panel); padding: 0 10px; cursor: pointer; font: inherit; color: var(--fg);
+  }
+  .dropdown-toggle img { width: 18px; height: 13px; display: block; border-radius: 2px; }
+  .dropdown-toggle .chev { font-size: 10px; color: var(--muted); }
+  .dropdown-menu {
+    position: absolute; top: calc(100% + 6px); right: 0; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.14); padding: 6px; display: none;
+    flex-direction: column; gap: 2px; min-width: 160px;
+  }
+  .dropdown-menu.open { display: flex; }
+  .dropdown-menu button {
+    display: flex; align-items: center; gap: 8px; background: none; border: none; text-align: left;
+    padding: 8px 10px; border-radius: 8px; font-size: 13px; cursor: pointer; font: inherit; color: var(--fg);
+  }
+  .dropdown-menu button img { width: 18px; height: 13px; display: block; }
+  .dropdown-menu button:hover, .dropdown-menu button.active { background: rgba(127,127,127,.15); }
 
   /* Operation picker FAB (bottom-right) */
   #fab-wrap { position: fixed; right: 20px; bottom: 20px; z-index: 50; }
@@ -834,25 +832,24 @@ const PAGE = /* html */ `<!doctype html>
 </style>
 </head>
 <body>
-<div id="mode-switch">
-  <div class="pill">
-    <button class="active" data-mode="simulated" onclick="setMode('simulated')" id="modeSimBtn">Simulated</button>
-    <button data-mode="live" onclick="setMode('live')" id="modeLiveBtn">Live</button>
-  </div>
-  <span id="live-warning" style="display:none"></span>
-</div>
 <div id="top-right">
-  <div class="pill" id="lang-switch">
-    <button class="active" data-lang="en" onclick="setLang('en')"><img src="/assets/flag/us.svg" alt="EN" /></button>
-    <button data-lang="es" onclick="setLang('es')"><img src="/assets/flag/es.svg" alt="ES" /></button>
-    <button data-lang="pt" onclick="setLang('pt')"><img src="/assets/flag/br.svg" alt="PT" /></button>
+  <div class="dropdown" id="lang-switch">
+    <button class="dropdown-toggle" id="langToggle" onclick="toggleLangMenu()" aria-haspopup="true" aria-label="Language">
+      <img id="langFlag" src="/assets/flag/us.svg" alt="" />
+      <span class="chev">⌄</span>
+    </button>
+    <div class="dropdown-menu" id="langMenu">
+      <button class="active" data-lang="en" onclick="setLang('en')"><img src="/assets/flag/us.svg" alt="" /><span>English</span></button>
+      <button data-lang="es" onclick="setLang('es')"><img src="/assets/flag/es.svg" alt="" /><span>Español</span></button>
+      <button data-lang="pt" onclick="setLang('pt')"><img src="/assets/flag/br.svg" alt="" /><span>Português</span></button>
+    </div>
   </div>
-  <button class="pill" id="theme-toggle" onclick="toggleTheme()">Dark</button>
+  <button id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">☀️</button>
 </div>
 <main>
-  <div id="view">${renderStep("buy", "provider", { provider: DEFAULT_PROVIDER, currency: null, method: null, amount: null }, "en", "simulated")}</div>
+  <div id="view">${renderStep("buy", "provider", { provider: null, currency: null, method: null, amount: null }, "en", "simulated")}</div>
   <div id="actions"></div>
-  <p id="hint">Mercado Pago is simulated by default; switch to Live (top-left) to use real credentials from .env.</p>
+  <p id="hint">This demo runs against simulated payment providers — no real charges.</p>
 </main>
 <div id="fab-wrap">
   <div id="fab-menu" class="fab-menu"></div>
@@ -862,11 +859,11 @@ const PAGE = /* html */ `<!doctype html>
   var STEPS = ${JSON.stringify(STEPS)};
   var STR_DICT = ${JSON.stringify(STRINGS)};
   var lang = 'en';
-  var mode = 'simulated';
+  var mode = 'simulated'; // fixed — which network/credentials a provider talks to is decided at provider construction, not toggled here
   var op = 'buy';
   var uiMode = 'wizard';
   var stepIdx = 0;
-  var state = { provider: ${JSON.stringify(DEFAULT_PROVIDER)}, currency: null, method: null, amount: null };
+  var state = { provider: null, currency: null, method: null, amount: null };
   var orderId = null;
   var PROVIDER_META = {};
   ${INITIAL_PROVIDERS}.forEach(function (p) { PROVIDER_META[p.name] = p; });
@@ -902,8 +899,8 @@ const PAGE = /* html */ `<!doctype html>
     var data = await res.json();
     PROVIDER_META = {};
     (data.providers || []).forEach(function (p) { PROVIDER_META[p.name] = p; });
-    if (data.providers && data.providers.length && !data.providers.some(function (p) { return p.name === state.provider; })) {
-      state.provider = data.providers[0].name;
+    if (state.provider && data.providers && !data.providers.some(function (p) { return p.name === state.provider; })) {
+      state.provider = null;
     }
     swapView('view', data.html);
   }
@@ -1004,33 +1001,27 @@ const PAGE = /* html */ `<!doctype html>
   function confirmBuy() { pollConfirm('confirm'); }
   function confirmSell() { pollConfirm('sellConfirm'); }
 
+  var LANG_FLAG = { en: 'us', es: 'es', pt: 'br' };
+
   function setLang(l) {
     lang = l;
-    document.querySelectorAll('#lang-switch button').forEach(function (btn) {
+    document.getElementById('langFlag').src = '/assets/flag/' + LANG_FLAG[l] + '.svg';
+    document.querySelectorAll('#langMenu button').forEach(function (btn) {
       btn.classList.toggle('active', btn.getAttribute('data-lang') === l);
     });
+    document.getElementById('langMenu').classList.remove('open');
     if (uiMode === 'wizard') fetchStep();
   }
 
-  function setMode(m) {
-    mode = m;
-    document.getElementById('modeSimBtn').classList.toggle('active', m === 'simulated');
-    document.getElementById('modeLiveBtn').classList.toggle('active', m === 'live');
-    var warn = document.getElementById('live-warning');
-    warn.style.display = m === 'live' ? 'block' : 'none';
-    warn.textContent = m === 'live' ? '⚠ real API calls' : '';
-    if (uiMode === 'wizard') {
-      state = { provider: state.provider, currency: null, method: null, amount: null };
-      stepIdx = 0;
-      fetchStep();
-    }
+  function toggleLangMenu() {
+    document.getElementById('langMenu').classList.toggle('open');
   }
 
   function toggleTheme() {
     var html = document.documentElement;
     var next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     html.setAttribute('data-theme', next);
-    document.getElementById('theme-toggle').textContent = next === 'dark' ? STR('lightLabel') : STR('darkLabel');
+    document.getElementById('theme-toggle').textContent = next === 'dark' ? '🌙' : '☀️';
   }
 
   function toggleFab() {
@@ -1052,15 +1043,17 @@ const PAGE = /* html */ `<!doctype html>
     stepIdx = 0;
     uiMode = 'wizard';
     orderId = null;
-    state = { provider: state.provider, currency: null, method: null, amount: null };
+    state = { provider: null, currency: null, method: null, amount: null };
     document.getElementById('actions').innerHTML = '';
     document.getElementById('fab-menu').classList.remove('open');
     fetchStep();
   }
 
   document.addEventListener('click', function (e) {
-    var wrap = document.getElementById('fab-wrap');
-    if (!wrap.contains(e.target)) document.getElementById('fab-menu').classList.remove('open');
+    var fabWrap = document.getElementById('fab-wrap');
+    if (!fabWrap.contains(e.target)) document.getElementById('fab-menu').classList.remove('open');
+    var langWrap = document.getElementById('lang-switch');
+    if (!langWrap.contains(e.target)) document.getElementById('langMenu').classList.remove('open');
   });
 </script>
 </body>
