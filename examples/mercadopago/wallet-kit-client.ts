@@ -26,10 +26,24 @@ StellarWalletsKit.init({
 declare global {
   interface Window {
     connectStellarWallet: () => Promise<string>;
+    signStellarTransaction: (xdr: string, address: string, networkPassphrase: string) => Promise<string>;
   }
 }
 
 window.connectStellarWallet = async function connectStellarWallet(): Promise<string> {
   const { address } = await StellarWalletsKit.authModal();
   return address;
+};
+
+/**
+ * Signs an unsigned transaction XDR with whichever wallet the user connected
+ * via connectStellarWallet() above — used by the wallet step's "enable
+ * trustline" prompt (see demo-ui.tsx's ensureTrustline()) to open the demo's
+ * USDC trustline without the server ever touching this wallet's private key.
+ * Throws if the user rejects the signature request in their wallet, or if no
+ * wallet is connected (e.g. a manually-pasted address, which has no signer).
+ */
+window.signStellarTransaction = async function signStellarTransaction(xdr: string, address: string, networkPassphrase: string): Promise<string> {
+  const { signedTxXdr } = await StellarWalletsKit.signTransaction(xdr, { address, networkPassphrase });
+  return signedTxXdr;
 };

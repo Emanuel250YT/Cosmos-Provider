@@ -152,6 +152,15 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     youPay: "You pay",
     youReceive: "You receive",
     rateNote: "1 USDC ≈",
+    trustlineTitle: "Enable USDC trustline",
+    trustlineBodyKit: "Your wallet doesn't have a trustline for this demo's USDC asset yet. Approve one now (a single, no-cost Stellar operation) so we can send you real testnet USDC.",
+    trustlineBodyManual: "This address doesn't have a trustline for this demo's USDC asset yet. Without one we can't send real testnet USDC to it — the order will still complete, but settlement will use a placeholder transaction id.",
+    trustlineEnable: "Enable trustline",
+    trustlineContinueAnyway: "Continue anyway",
+    trustlineChecking: "Checking your wallet…",
+    trustlineSuccess: "Trustline enabled — continuing…",
+    trustlineError: "Couldn't enable the trustline. You can try again or continue anyway.",
+    copiedToClipboard: "Copied to clipboard",
   },
   es: {
     opBuy: "Comprar USDC",
@@ -203,6 +212,15 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     youPay: "Pagás",
     youReceive: "Recibís",
     rateNote: "1 USDC ≈",
+    trustlineTitle: "Habilitar trustline de USDC",
+    trustlineBodyKit: "Tu wallet todavía no tiene una trustline para el USDC de este demo. Aprobá una ahora (una única operación de Stellar sin costo) para que podamos enviarte USDC real de testnet.",
+    trustlineBodyManual: "Esta dirección todavía no tiene una trustline para el USDC de este demo. Sin ella no podemos enviarle USDC real de testnet — la orden se va a completar igual, pero el settlement va a usar un id de transacción de prueba.",
+    trustlineEnable: "Habilitar trustline",
+    trustlineContinueAnyway: "Continuar igual",
+    trustlineChecking: "Verificando tu wallet…",
+    trustlineSuccess: "Trustline habilitada — continuando…",
+    trustlineError: "No pudimos habilitar la trustline. Podés reintentar o continuar igual.",
+    copiedToClipboard: "Copiado al portapapeles",
   },
   pt: {
     opBuy: "Comprar USDC",
@@ -254,6 +272,15 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     youPay: "Você paga",
     youReceive: "Você recebe",
     rateNote: "1 USDC ≈",
+    trustlineTitle: "Habilitar trustline de USDC",
+    trustlineBodyKit: "Sua wallet ainda não tem uma trustline para o USDC deste demo. Aprove uma agora (uma única operação Stellar sem custo) para que possamos enviar USDC real de testnet.",
+    trustlineBodyManual: "Este endereço ainda não tem uma trustline para o USDC deste demo. Sem ela não conseguimos enviar USDC real de testnet — o pedido vai ser concluído mesmo assim, mas o settlement vai usar um id de transação de teste.",
+    trustlineEnable: "Habilitar trustline",
+    trustlineContinueAnyway: "Continuar mesmo assim",
+    trustlineChecking: "Verificando sua wallet…",
+    trustlineSuccess: "Trustline habilitada — continuando…",
+    trustlineError: "Não conseguimos habilitar a trustline. Você pode tentar de novo ou continuar mesmo assim.",
+    copiedToClipboard: "Copiado para a área de transferência",
   },
 };
 const t = (lang: Lang, key: string): string => STRINGS[lang]?.[key] ?? key;
@@ -267,6 +294,7 @@ const providerLabel = (name: string): string => PROVIDER_DISPLAY_NAME[name] ?? n
 const currencyLabelKey = (c: Currency): string => (c === "ARS" ? "ars" : c === "MXN" ? "mxn" : "brl");
 const initials = (name: string): string => name.slice(0, 2).toUpperCase();
 const shortenAddress = (address: string): string => (address.length > 12 ? `${address.slice(0, 4)}…${address.slice(-4)}` : address);
+const isValidStellarAddress = (value: string): boolean => /^G[A-Z2-7]{55}$/.test(value);
 /** This demo's wallet address round-trips through the URL query string (`/api/step?wallet=...`) and back into server-rendered HTML — escape it wherever it's echoed, now that the server is reachable from the public internet. */
 const escapeHtml = (value: string): string =>
   value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -326,8 +354,14 @@ console.log("Funding a Stellar testnet demo-USDC issuer (Friendbot)...");
 // Doubles as the "treasury": the account that issues an asset can send it
 // directly, with no trustline of its own — issuing IS just a payment.
 const issuer = Keypair.random();
+// Matches CosmosRamp's default `defaults.asset` ("USDC") — neither ramp
+// instance below overrides it, so every order settles in this asset.
+const DEMO_ASSET_CODE = "USDC";
 // Populated by generateDemoWallet() below — settlement needs each receiving
-// wallet's own keypair to sign the trustline it opens for itself.
+// wallet's own keypair to sign the trustline it opens for itself. Wallets
+// connected via Stellar Wallets Kit (the primary path) are NOT in here — the
+// server never holds their key — so they open their own trustline via the
+// /api/trustline* actions below (see wallet-kit-client.ts's signStellarTransaction).
 const walletByAddress = new Map<string, Keypair>();
 let stellarReady = false;
 try {
@@ -358,43 +392,74 @@ async function generateDemoWallet(): Promise<string> {
 }
 
 /**
+ * Whether `wallet` already has an open trustline for the demo USDC asset —
+ * checked via Horizon before deciding whether settlement needs a `changeTrust`
+ * op. `false` (never throws) for an account that doesn't exist on testnet
+ * yet, same as "no trustline" — settlement/the trustline-open flow handle
+ * funding it themselves.
+ */
+async function accountTrustsAsset(wallet: string, asset: StellarAsset): Promise<boolean> {
+  try {
+    const account = await stellarServer.loadAccount(wallet);
+    return account.balances.some((b) => "asset_code" in b && "asset_issuer" in b && b.asset_code === asset.getCode() && b.asset_issuer === asset.getIssuer());
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Shared by both CosmosRamp instances AND called directly for Live/Etherfuse
  * confirmations (see confirmOrder below) — Etherfuse orders skip this
  * entirely (it already released its own crypto); everything else gets a
  * real Stellar testnet release, regardless of whether the fiat leg was
  * simulated or live.
+ *
+ * Two ways a wallet can end up trusting the demo asset by the time this
+ * runs: the server holds its key (`walletByAddress` — the "use a test
+ * wallet" fallback) and opens the trustline itself here in the same tx as
+ * the payment; or it's a real, user-connected wallet that already opened its
+ * OWN trustline via the /api/trustline* actions (see the wallet step's
+ * "enable trustline" prompt) before checkout. Either way, once a trustline
+ * exists this only needs the issuer's signature — Stellar payments never
+ * require the receiver to sign.
  */
 const settlementFn: SettlementFn = async ({ order, wallet, amount, asset }) => {
   if (order.provider.startsWith("etherfuse")) {
     console.log(`⛓ ${order.provider}: crypto already released internally by Etherfuse — skipping this demo's settlement.`);
     return { txId: `etherfuse-managed:${order.id}` };
   }
-  const receiver = wallet ? walletByAddress.get(wallet) : undefined;
-  if (stellarReady && wallet && receiver) {
+  if (stellarReady && wallet) {
     try {
       // Real Stellar asset (code = whatever `asset` the order actually
       // requested — "USDC" by default), issued by the demo issuer above.
-      // The receiving wallet's trustline is opened and the payment sent
-      // in the SAME transaction: `changeTrust` sourced from the wallet,
-      // `payment` sourced from the issuer, signed by both.
       const stellarAsset = new StellarAsset(asset, issuer.publicKey());
-      const account = await stellarServer.loadAccount(issuer.publicKey());
-      const tx = new TransactionBuilder(account, { fee: String(Number(BASE_FEE) * 2), networkPassphrase: Networks.TESTNET })
-        .addOperation(Operation.changeTrust({ asset: stellarAsset, source: wallet }))
-        .addOperation(
-          Operation.payment({
-            destination: wallet,
-            asset: stellarAsset,
-            amount: String(Math.round(amount * 1e7) / 1e7),
-          }),
-        )
-        .setTimeout(30)
-        .build();
-      tx.sign(issuer);
-      tx.sign(receiver);
-      const result = await stellarServer.submitTransaction(tx);
-      console.log(`⛓ settlement: opened trustline + sent ${amount} ${asset} (testnet, real asset) → ${wallet} — https://stellar.expert/explorer/testnet/tx/${result.hash}`);
-      return { txId: result.hash };
+      const receiver = walletByAddress.get(wallet); // set only for server-generated demo wallets — we hold this key
+      const trusts = await accountTrustsAsset(wallet, stellarAsset);
+      if (!trusts && !receiver) {
+        // A real, user-connected wallet with no trustline for this asset — we
+        // don't hold its key, so we can't open the trustline on its behalf
+        // here. The wallet step's "enable trustline" prompt is meant to
+        // catch this before checkout; landing here means it was skipped
+        // (e.g. the user chose "continue anyway").
+        console.warn(`⚠ ${wallet} has no trustline for ${asset} and we don't hold its key — falling back to a simulated tx id.`);
+      } else {
+        const account = await stellarServer.loadAccount(issuer.publicKey());
+        const builder = new TransactionBuilder(account, { fee: String(Number(BASE_FEE) * 2), networkPassphrase: Networks.TESTNET });
+        // Trustline (if it's not already open) and payment go in the SAME
+        // transaction: `changeTrust` sourced from the wallet, `payment`
+        // sourced from the issuer, signed by both — only reachable when we
+        // hold the wallet's key (the demo-wallet fallback).
+        if (!trusts) builder.addOperation(Operation.changeTrust({ asset: stellarAsset, source: wallet }));
+        builder.addOperation(Operation.payment({ destination: wallet, asset: stellarAsset, amount: String(Math.round(amount * 1e7) / 1e7) }));
+        const tx = builder.setTimeout(30).build();
+        tx.sign(issuer);
+        if (!trusts) tx.sign(receiver!);
+        const result = await stellarServer.submitTransaction(tx);
+        console.log(
+          `⛓ settlement: ${trusts ? "sent" : "opened trustline + sent"} ${amount} ${asset} (testnet, real asset) → ${wallet} — https://stellar.expert/explorer/testnet/tx/${result.hash}`,
+        );
+        return { txId: result.hash };
+      }
     } catch (error) {
       console.warn(`⚠ Stellar settlement failed, falling back to a simulated tx id: ${String(error)}`);
     }
@@ -402,6 +467,20 @@ const settlementFn: SettlementFn = async ({ order, wallet, amount, asset }) => {
   console.log(`⛓ settlement (simulated): sent ${amount} ${asset} → ${wallet}`);
   return { txId: `0xdemo${Date.now()}` };
 };
+
+/**
+ * stellar.expert link for a `settlementTxId`, only when it's a genuine
+ * Stellar testnet transaction hash (64 hex chars, as returned by
+ * `stellarServer.submitTransaction` above) — `undefined` for Etherfuse's
+ * `etherfuse-managed:<id>` marker and for the `0xdemo...` id `settlementFn`
+ * falls back to when Friendbot/testnet is unreachable, neither of which are
+ * real on-chain transactions. Passed to `rampOrderToDetailRows` so the
+ * "Settlement Tx" row only renders as a link when there's really something
+ * to click through to.
+ */
+function stellarExpertTxUrl(txId: string): string | undefined {
+  return /^[0-9a-f]{64}$/i.test(txId) ? `https://stellar.expert/explorer/testnet/tx/${txId}` : undefined;
+}
 
 // Etherfuse settles both Brazil (PIX/BRL) and Mexico (SPEI/MXN), so both
 // currencies show up in the picker and both build a real charge — BRL
@@ -678,7 +757,7 @@ async function renderPending(order: RampOrderData, lang: Lang): Promise<string> 
       qr={qr ?? linkQr}
       qrIsPaymentLink={!qr && !!linkQr}
       paymentLink={link}
-      rows={rampOrderToDetailRows(order)}
+      rows={rampOrderToDetailRows(order, { settlementTxUrl: stellarExpertTxUrl })}
     />,
   );
 }
@@ -689,18 +768,20 @@ function renderSellPending(order: RampOrderData, lang: Lang): string {
     <ReceivePayment
       title={t(lang, "waitingCrypto")}
       amount={`${order.quote.cryptoAmount} ${order.quote.asset}`}
-      rows={rampOrderToDetailRows(order)}
+      rows={rampOrderToDetailRows(order, { settlementTxUrl: stellarExpertTxUrl })}
     />,
   );
 }
 
 /** The receipt shown once an order is paid and settled. */
 function renderReceipt(order: RampOrderData): string {
+  const logoUrl = ramp.providers.find((p) => p.name === order.provider)?.logoUrl;
   return renderToStaticMarkup(
     <PaymentConfirmation
       itemTitle={`${order.direction === "onramp" ? "Buy" : "Sell"} USDC · ${order.provider}`}
       itemSubtitle={new Date(order.updatedAt).toLocaleString()}
-      rows={rampOrderToDetailRows(order)}
+      logoUrl={logoUrl}
+      rows={rampOrderToDetailRows(order, { settlementTxUrl: stellarExpertTxUrl })}
     />,
   );
 }
@@ -801,6 +882,49 @@ const actions: Record<string, Action> = {
   /** Opt-in fallback for the wallet step's "no wallet installed?" link — a fresh, Friendbot-funded testnet address. */
   async demoWallet() {
     return { wallet: await generateDemoWallet() };
+  },
+
+  /** Whether `wallet` already trusts the demo USDC asset — the wallet step checks this before checkout to decide whether to prompt for a trustline. */
+  async checkTrustline(body) {
+    const wallet = typeof body.wallet === "string" ? body.wallet.trim() : "";
+    if (!isValidStellarAddress(wallet)) return { trusts: false };
+    const stellarAsset = new StellarAsset(DEMO_ASSET_CODE, issuer.publicKey());
+    return { trusts: await accountTrustsAsset(wallet, stellarAsset) };
+  },
+
+  /**
+   * Builds an UNSIGNED `changeTrust` transaction (source = `wallet`) for the
+   * demo USDC asset — the browser signs it with whichever wallet the user
+   * connected (Stellar Wallets Kit's `signTransaction`, see
+   * wallet-kit-client.ts), then POSTs the signed XDR to `submitTrustline`
+   * below. The server never touches this wallet's private key. Auto-funds
+   * `wallet` via Friendbot first if it has no XLM yet on testnet — common for
+   * a freshly created wallet — since a account needs to exist to have a
+   * sequence number to build a transaction from.
+   */
+  async trustlineTransaction(body) {
+    const wallet = typeof body.wallet === "string" ? body.wallet.trim() : "";
+    if (!isValidStellarAddress(wallet)) throw new Error("Invalid Stellar address.");
+    if (!stellarReady) throw new Error("Stellar testnet is unreachable right now — try again in a moment.");
+    let account;
+    try {
+      account = await stellarServer.loadAccount(wallet);
+    } catch {
+      await stellarServer.friendbot(wallet).call();
+      account = await stellarServer.loadAccount(wallet);
+    }
+    const stellarAsset = new StellarAsset(DEMO_ASSET_CODE, issuer.publicKey());
+    const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: Networks.TESTNET }).addOperation(Operation.changeTrust({ asset: stellarAsset })).setTimeout(60).build();
+    return { xdr: tx.toXDR(), networkPassphrase: Networks.TESTNET };
+  },
+
+  /** Submits a client-signed `changeTrust` XDR (from `trustlineTransaction`) to Stellar testnet. */
+  async submitTrustline(body) {
+    const xdr = typeof body.xdr === "string" ? body.xdr : "";
+    if (!xdr) throw new Error("Missing signed transaction.");
+    const tx = TransactionBuilder.fromXDR(xdr, Networks.TESTNET);
+    const result = await stellarServer.submitTransaction(tx);
+    return { txHash: result.hash };
   },
 
   async confirm(body) {
@@ -1079,6 +1203,29 @@ const PAGE = /* html */ `<!doctype html>
   @keyframes toastIn { from { opacity: 0; transform: translateY(-8px) scale(.96); } to { opacity: 1; transform: none; } }
   @keyframes toastOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-8px) scale(.96); } }
 
+  /* Trustline modal — shown from the wallet step when the destination has no trustline for the demo USDC asset yet. */
+  #trustline-backdrop {
+    position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.45);
+    display: none; align-items: center; justify-content: center; padding: 20px;
+  }
+  #trustline-backdrop.open { display: flex; }
+  #trustline-modal {
+    width: 100%; max-width: 380px; background: var(--panel); color: var(--fg); border-radius: 20px;
+    padding: 24px; box-shadow: 0 12px 40px rgba(0,0,0,.24); animation: viewEnter .2s cubic-bezier(.16,1,.3,1) both;
+  }
+  #trustline-modal h2 { font-size: 17px; margin: 0 0 10px; }
+  #trustline-modal p { font-size: 13px; color: var(--muted); margin: 0 0 20px; line-height: 1.5; }
+  #trustline-modal .primary {
+    width: 100%; background: var(--cosmos-button-bg); color: var(--cosmos-button-fg); border: none;
+    border-radius: 14px; padding: 14px; font-size: 14px; font-weight: 700; cursor: pointer; font: inherit; margin-bottom: 8px;
+  }
+  #trustline-modal .secondary {
+    width: 100%; background: none; color: var(--muted); border: none; padding: 10px; font-size: 13px; cursor: pointer; font: inherit;
+  }
+  #trustline-modal .status { font-size: 13px; text-align: center; margin: 0 0 12px; }
+  #trustline-modal .status.error { color: #DC2626; }
+  #trustline-modal .status.success { color: #16A34A; }
+
   /* Top-right: language dropdown + theme toggle. */
   #top-right { position: fixed; top: 20px; right: 20px; z-index: 50; display: flex; gap: 8px; align-items: center; }
 
@@ -1132,6 +1279,7 @@ const PAGE = /* html */ `<!doctype html>
 </head>
 <body>
 <div id="toast-stack" aria-live="polite"></div>
+<div id="trustline-backdrop"><div id="trustline-modal" role="dialog" aria-modal="true"></div></div>
 <div id="top-right">
   <div class="dropdown" id="lang-switch">
     <button class="dropdown-toggle" id="langToggle" onclick="toggleLangMenu()" aria-haspopup="true" aria-label="Language">
@@ -1163,7 +1311,7 @@ const PAGE = /* html */ `<!doctype html>
   var op = 'buy';
   var uiMode = 'wizard';
   var stepIdx = 0;
-  var state = { provider: null, currency: null, method: null, wallet: null, amount: null };
+  var state = { provider: null, currency: null, method: null, wallet: null, walletSource: null, amount: null };
   var orderId = null;
   // 'buy' | 'sell' | null — which kind of order (if any) is currently pending
   // completion, i.e. showing a ReceivePayment view and being polled/confirmable.
@@ -1383,6 +1531,7 @@ const PAGE = /* html */ `<!doctype html>
     // it so it doesn't render as still-selected.
     var landingIdx = STEP_FIELDS.indexOf(STEPS[op][stepIdx]);
     STEP_FIELDS.slice(landingIdx).forEach(function (f) { state[f] = null; });
+    if (landingIdx <= STEP_FIELDS.indexOf('wallet')) state.walletSource = null;
     fetchStep();
   }
 
@@ -1395,9 +1544,17 @@ const PAGE = /* html */ `<!doctype html>
     return /^G[A-Z2-7]{55}$/.test(addr || '');
   }
 
-  /** Shared by connectWallet(), useDemoWallet() and useManualWallet(): reflects the chosen address in the wallet card and unlocks Continue. */
-  function applyWalletConnected(address) {
+  /**
+   * Shared by connectWallet(), useDemoWallet() and useManualWallet(): reflects
+   * the chosen address in the wallet card and unlocks Continue. 'source'
+   * ('kit' | 'demo' | 'manual') drives continueWallet()'s trustline check:
+   * only a 'kit' wallet can sign its own changeTrust here in the browser; a
+   * 'demo' wallet's key is held server-side (settlement opens its trustline
+   * itself); a 'manual' address can only be warned, never signed for.
+   */
+  function applyWalletConnected(address, source) {
     state.wallet = address;
+    state.walletSource = source;
     var textEl = document.getElementById('walletAddressText');
     if (textEl) textEl.textContent = shortenAddress(address);
     var manualInput = document.getElementById('walletManualInput');
@@ -1421,7 +1578,7 @@ const PAGE = /* html */ `<!doctype html>
     setButtonLoading(btn, true);
     try {
       var address = await window.connectStellarWallet();
-      applyWalletConnected(address);
+      applyWalletConnected(address, 'kit');
       setButtonLoading(btn, false, STR('changeWallet'));
     } catch (err) {
       setButtonLoading(btn, false);
@@ -1438,7 +1595,7 @@ const PAGE = /* html */ `<!doctype html>
       var res = await fetch('/api/demoWallet', { method: 'POST', body: '{}' });
       var data = await res.json();
       if (data.error || !data.wallet) throw new Error(data.error || 'no wallet');
-      applyWalletConnected(data.wallet);
+      applyWalletConnected(data.wallet, 'demo');
       var connectBtn = document.getElementById('connectWalletBtn');
       setButtonLoading(connectBtn, false, STR('changeWallet'));
     } catch (err) {
@@ -1455,16 +1612,95 @@ const PAGE = /* html */ `<!doctype html>
       showToast(STR('walletInvalid'), 'error');
       return;
     }
-    applyWalletConnected(value);
+    applyWalletConnected(value, 'manual');
   }
 
-  function continueWallet() {
+  function proceedPastWallet() {
+    stepIdx++;
+    fetchStep();
+  }
+
+  /**
+   * Before leaving the wallet step: a 'demo' wallet's key is held
+   * server-side, so settlement opens its trustline itself — no check needed.
+   * Anything else gets checked against Horizon; if it's missing, a 'kit'
+   * wallet can sign its own changeTrust right here (openTrustlineModal), a
+   * 'manual' address can only be warned (we don't hold its key) since
+   * settlement will otherwise fall back to a simulated tx id.
+   */
+  async function continueWallet() {
     if (!state.wallet) {
       showToast(STR('walletRequired'), 'error');
       return;
     }
-    stepIdx++;
-    fetchStep();
+    if (state.walletSource === 'demo') {
+      proceedPastWallet();
+      return;
+    }
+    var btn = document.getElementById('walletContinueBtn');
+    setButtonLoading(btn, true);
+    try {
+      var res = await fetch('/api/checkTrustline', { method: 'POST', body: JSON.stringify({ wallet: state.wallet }) });
+      var data = await res.json();
+      setButtonLoading(btn, false);
+      if (data.trusts) {
+        proceedPastWallet();
+        return;
+      }
+    } catch (err) {
+      setButtonLoading(btn, false);
+      // Couldn't check — let it through; settlement itself falls back to a
+      // simulated tx id if the trustline really is missing.
+      proceedPastWallet();
+      return;
+    }
+    openTrustlineModal();
+  }
+
+  /** Renders the trustline prompt — an interactive "sign now" flow for a connected wallet, a plain warning (with no way to act on it) for a manually-pasted address. */
+  function openTrustlineModal() {
+    var isKit = state.walletSource === 'kit';
+    var modal = document.getElementById('trustline-modal');
+    modal.innerHTML =
+      '<h2>' + STR('trustlineTitle') + '</h2>' +
+      '<p>' + STR(isKit ? 'trustlineBodyKit' : 'trustlineBodyManual') + '</p>' +
+      '<div id="trustline-status"></div>' +
+      (isKit ? '<button type="button" class="primary" id="trustlineEnableBtn" onclick="enableTrustline()">' + STR('trustlineEnable') + '</button>' : '') +
+      '<button type="button" class="secondary" onclick="closeTrustlineModal(true)">' + STR('trustlineContinueAnyway') + '</button>';
+    document.getElementById('trustline-backdrop').classList.add('open');
+  }
+
+  function closeTrustlineModal(thenProceed) {
+    document.getElementById('trustline-backdrop').classList.remove('open');
+    if (thenProceed) proceedPastWallet();
+  }
+
+  function setTrustlineStatus(message, kind) {
+    var el = document.getElementById('trustline-status');
+    if (el) el.innerHTML = message ? '<p class="status' + (kind ? ' ' + kind : '') + '">' + message + '</p>' : '';
+  }
+
+  /** The connected wallet signs its own changeTrust (server never sees its key) — see wallet-kit-client.ts's signStellarTransaction. */
+  async function enableTrustline() {
+    var btn = document.getElementById('trustlineEnableBtn');
+    if (btn && btn.disabled) return;
+    setButtonLoading(btn, true);
+    setTrustlineStatus(STR('trustlineChecking'));
+    try {
+      var buildRes = await fetch('/api/trustlineTransaction', { method: 'POST', body: JSON.stringify({ wallet: state.wallet }) });
+      var buildData = await buildRes.json();
+      if (buildData.error) throw new Error(buildData.error);
+      var signedXdr = await window.signStellarTransaction(buildData.xdr, state.wallet, buildData.networkPassphrase);
+      var submitRes = await fetch('/api/submitTrustline', { method: 'POST', body: JSON.stringify({ xdr: signedXdr }) });
+      var submitData = await submitRes.json();
+      if (submitData.error) throw new Error(submitData.error);
+      setButtonLoading(btn, false);
+      setTrustlineStatus(STR('trustlineSuccess'), 'success');
+      setTimeout(function () { closeTrustlineModal(true); }, 900);
+    } catch (err) {
+      setButtonLoading(btn, false);
+      setTrustlineStatus(STR('trustlineError'), 'error');
+    }
   }
 
   async function submitStep() {
@@ -1591,7 +1827,7 @@ const PAGE = /* html */ `<!doctype html>
     orderId = null;
     pendingKind = null;
     stopPolling();
-    state = { provider: null, currency: null, method: null, wallet: null, amount: null };
+    state = { provider: null, currency: null, method: null, wallet: null, walletSource: null, amount: null };
     document.getElementById('actions').innerHTML = '';
     document.getElementById('fab-menu').classList.remove('open');
     fetchStep();
@@ -1602,6 +1838,18 @@ const PAGE = /* html */ `<!doctype html>
     if (!fabWrap.contains(e.target)) document.getElementById('fab-menu').classList.remove('open');
     var langWrap = document.getElementById('lang-switch');
     if (!langWrap.contains(e.target)) document.getElementById('langMenu').classList.remove('open');
+    // Delegated so it works for every DetailRow rendered with copyable:true
+    // (settlement tx, etc.) regardless of how many times #view gets swapped —
+    // see DetailRow.tsx's docstring for why this can't just be a React onClick.
+    var copyBtn = e.target.closest && e.target.closest('[data-copy-value]');
+    if (copyBtn) {
+      var value = copyBtn.getAttribute('data-copy-value');
+      navigator.clipboard.writeText(value).then(function () {
+        showToast(STR('copiedToClipboard'), 'success');
+      }).catch(function () {
+        showToast(STR('genericError'), 'error');
+      });
+    }
   });
 </script>
 </body>

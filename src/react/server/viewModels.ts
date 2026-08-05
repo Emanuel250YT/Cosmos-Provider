@@ -47,8 +47,19 @@ export function quoteToSummaryRows(quote: QuoteBreakdown): SummaryRowProps[] {
   ];
 }
 
-/** Transaction-detail rows (status, id, method, dates) for a ramp order. */
-export function rampOrderToDetailRows(order: RampOrderData): DetailRowProps[] {
+/**
+ * Transaction-detail rows (status, id, method, dates) for a ramp order.
+ *
+ * `settlementTxId` is chain-agnostic at the SDK level (`SettlementFn` can
+ * release on whatever network the caller wires up), so this doesn't assume
+ * a block explorer on its own — pass `settlementTxUrl` to make the
+ * "Settlement Tx" row clickable, e.g.
+ * `(txId) => \`https://stellar.expert/explorer/testnet/tx/${txId}\`` for a
+ * real Stellar release. Return `undefined` from it to leave a given id as
+ * plain text (e.g. one that isn't a real on-chain tx, like a simulated
+ * fallback id).
+ */
+export function rampOrderToDetailRows(order: RampOrderData, options?: { settlementTxUrl?: (txId: string) => string | undefined }): DetailRowProps[] {
   const rows: DetailRowProps[] = [
     { label: "Order ID", value: order.id },
     { label: "Status", value: order.status, valueColor: STATUS_COLOR[order.status] ?? "var(--cosmos-fg, #111827)" },
@@ -56,7 +67,7 @@ export function rampOrderToDetailRows(order: RampOrderData): DetailRowProps[] {
   ];
   if (order.chargeId) rows.push({ label: "Payment ID", value: order.chargeId });
   if (order.charge?.method) rows.push({ label: "Method", value: order.charge.method });
-  if (order.settlementTxId) rows.push({ label: "Settlement Tx", value: order.settlementTxId });
+  if (order.settlementTxId) rows.push({ label: "Settlement Tx", value: order.settlementTxId, href: options?.settlementTxUrl?.(order.settlementTxId), copyable: true });
   rows.push({ label: "Created", value: new Date(order.createdAt).toLocaleString() });
   return rows;
 }

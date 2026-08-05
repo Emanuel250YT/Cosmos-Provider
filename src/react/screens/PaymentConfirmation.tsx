@@ -7,12 +7,14 @@ export interface PaymentConfirmationProps {
   itemSubtitle: string;
   /** Rows rendered as `DetailRow`s, in order — e.g. amount, status, bill id, then payment method, date, time, then tax and total. */
   rows: Array<DetailRowProps>;
+  /** Provider/item logo shown in the header circle — a striped placeholder when omitted. */
+  logoUrl?: string;
   onShare?: () => void;
   locale?: Locale;
 }
 
 /** "Payment success" summary card with a share action. */
-export function PaymentConfirmation({ itemTitle, itemSubtitle, rows, onShare, locale = "en" }: PaymentConfirmationProps) {
+export function PaymentConfirmation({ itemTitle, itemSubtitle, rows, logoUrl, onShare, locale = "en" }: PaymentConfirmationProps) {
   return (
     <div style={{ ...screenCardStyle, fontFamily: "Helvetica, Arial, sans-serif", background: "var(--cosmos-bg-soft, #F7F7F8)", borderRadius: 24, paddingBottom: 24, color: "var(--cosmos-fg, #111827)" }}>
       <div style={{ padding: "16px 20px" }}>
@@ -36,9 +38,21 @@ export function PaymentConfirmation({ itemTitle, itemSubtitle, rows, onShare, lo
                   width: 36,
                   height: 36,
                   borderRadius: "50%",
-                  background: "repeating-linear-gradient(45deg, var(--cosmos-border, #E5E7EB), var(--cosmos-border, #E5E7EB) 4px, var(--cosmos-bg-soft, #EDEEF0) 4px, var(--cosmos-bg-soft, #EDEEF0) 8px)",
+                  flexShrink: 0,
+                  boxSizing: "border-box",
+                  overflow: "hidden",
+                  background: logoUrl
+                    ? "#fff"
+                    : "repeating-linear-gradient(45deg, var(--cosmos-border, #E5E7EB), var(--cosmos-border, #E5E7EB) 4px, var(--cosmos-bg-soft, #EDEEF0) 4px, var(--cosmos-bg-soft, #EDEEF0) 8px)",
+                  border: logoUrl ? "1px solid var(--cosmos-border, #F0F0F1)" : undefined,
+                  padding: logoUrl ? 5 : undefined,
+                  display: logoUrl ? "flex" : undefined,
+                  alignItems: logoUrl ? "center" : undefined,
+                  justifyContent: logoUrl ? "center" : undefined,
                 }}
-              />
+              >
+                {logoUrl ? <img src={logoUrl} alt={itemTitle} style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : null}
+              </div>
               <div style={{ display: "flex", flexDirection: "column" }}>
                 <span style={{ fontSize: 15, fontWeight: 700 }}>{itemTitle}</span>
                 <span style={{ fontSize: 12, color: "var(--cosmos-muted, #9CA3AF)" }}>{itemSubtitle}</span>
