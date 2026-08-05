@@ -93,12 +93,14 @@
     }
   },
   "devDependencies": {
+    "@creit.tech/stellar-wallets-kit": "^2.5.0",
     "@stellar/stellar-sdk": "^16.2.0",
     "@types/node": "^22.20.1",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "dotenv": "^17.4.2",
+    "esbuild": "^0.28.1",
     "flag-icons": "^7.5.0",
     "js-sha3": "^0.12.0",
     "react": "^18.3.1",

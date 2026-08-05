@@ -55,6 +55,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as esbuild from "esbuild";
 import "dotenv/config";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset as StellarAsset, BASE_FEE } from "@stellar/stellar-sdk";
@@ -84,6 +85,7 @@ interface WizardState {
   provider: string | null;
   currency: Currency | null;
   method: Method | null;
+  wallet: string | null;
   amount: number | null;
 }
 
@@ -95,7 +97,7 @@ const parseCurrency = (v: unknown): Currency => (v === "ARS" ? "ARS" : v === "MX
 const toFiatCurrency = (c: Currency): FiatCurrency => (c === "ARS" ? FiatCurrency.ARS : c === "MXN" ? FiatCurrency.MXN : FiatCurrency.BRL);
 
 const STEPS: Record<Op, string[]> = {
-  buy: ["provider", "currency", "method", "amount"],
+  buy: ["provider", "currency", "method", "wallet", "amount"],
   sell: ["provider", "currency", "amount"],
   quote: ["provider", "currency", "amount"],
 };
@@ -108,6 +110,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     stepProvider: "Provider",
     stepCurrency: "Currency",
     stepMethod: "Method",
+    stepWallet: "Wallet",
     stepAmount: "Amount",
     subtitleBuy: "Choose a provider and how you'd like to pay.",
     subtitleSell: "Choose a provider and how much USDC you're selling.",
@@ -120,6 +123,14 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     mxn: "Mexican Peso (MXN)",
     pix: "PIX QR",
     link: "Payment link",
+    walletLabel: "Destination wallet",
+    connectWallet: "Connect wallet",
+    changeWallet: "Change wallet",
+    walletNotConnected: "No wallet connected",
+    walletConnectError: "Couldn't connect your wallet. Please try again.",
+    useDemoWallet: "No wallet installed? Use a test wallet",
+    walletHint: "Where should we send your USDC? Connect a Stellar wallet (Freighter, xBull, Albedo, Rabet, Hana, Lobstr).",
+    walletRequired: "Connect a wallet to continue.",
     amountFiat: "Amount",
     amountCrypto: "Amount (USDC)",
     checkStatus: "Check status",
@@ -145,6 +156,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     stepProvider: "Proveedor",
     stepCurrency: "Divisa",
     stepMethod: "Método",
+    stepWallet: "Wallet",
     stepAmount: "Monto",
     subtitleBuy: "Elegí un proveedor y cómo querés pagar.",
     subtitleSell: "Elegí un proveedor y cuánto USDC querés vender.",
@@ -157,6 +169,14 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     mxn: "Peso Mexicano (MXN)",
     pix: "QR PIX",
     link: "Link de pago",
+    walletLabel: "Wallet de destino",
+    connectWallet: "Conectar wallet",
+    changeWallet: "Cambiar wallet",
+    walletNotConnected: "Ninguna wallet conectada",
+    walletConnectError: "No pudimos conectar tu wallet. Probá de nuevo.",
+    useDemoWallet: "¿No tenés wallet instalada? Usar una de prueba",
+    walletHint: "¿A dónde enviamos tus USDC? Conectá una wallet de Stellar (Freighter, xBull, Albedo, Rabet, Hana, Lobstr).",
+    walletRequired: "Conectá una wallet para continuar.",
     amountFiat: "Monto",
     amountCrypto: "Monto (USDC)",
     checkStatus: "Verificar estado",
@@ -182,6 +202,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     stepProvider: "Provedor",
     stepCurrency: "Moeda",
     stepMethod: "Método",
+    stepWallet: "Wallet",
     stepAmount: "Valor",
     subtitleBuy: "Escolha um provedor e como você quer pagar.",
     subtitleSell: "Escolha um provedor e quanto USDC você está vendendo.",
@@ -194,6 +215,14 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     mxn: "Peso Mexicano (MXN)",
     pix: "QR PIX",
     link: "Link de pagamento",
+    walletLabel: "Wallet de destino",
+    connectWallet: "Conectar wallet",
+    changeWallet: "Trocar wallet",
+    walletNotConnected: "Nenhuma wallet conectada",
+    walletConnectError: "Não conseguimos conectar sua wallet. Tente novamente.",
+    useDemoWallet: "Não tem wallet instalada? Usar uma de teste",
+    walletHint: "Para onde enviamos seu USDC? Conecte uma wallet Stellar (Freighter, xBull, Albedo, Rabet, Hana, Lobstr).",
+    walletRequired: "Conecte uma wallet para continuar.",
     amountFiat: "Valor",
     amountCrypto: "Valor (USDC)",
     checkStatus: "Verificar status",
@@ -223,6 +252,7 @@ const PROVIDER_DISPLAY_NAME: Record<string, string> = {
 const providerLabel = (name: string): string => PROVIDER_DISPLAY_NAME[name] ?? name.charAt(0).toUpperCase() + name.slice(1).replace(/[-_]/g, " ");
 const currencyLabelKey = (c: Currency): string => (c === "ARS" ? "ars" : c === "MXN" ? "mxn" : "brl");
 const initials = (name: string): string => name.slice(0, 2).toUpperCase();
+const shortenAddress = (address: string): string => (address.length > 12 ? `${address.slice(0, 4)}…${address.slice(-4)}` : address);
 const methodsForProvider = (providerName: string, currency: Currency): Method[] => {
   // Etherfuse never returns a raw PIX code to render our own QR from — it's
   // always a hosted status-page link (see EtherfuseProvider's docstring).
@@ -242,6 +272,33 @@ const LOGOS_DIR = path.join(HERE, "..", "..", "src", "react", "images");
 const LANG_FLAG: Record<Lang, string> = { en: "us", es: "es", pt: "br" };
 
 // ---------------------------------------------------------------------------
+// Stellar Wallets Kit bundle: `wallet-kit-client.ts` is browser-only code
+// (it touches `window` and wallet browser extensions), so it can't just be
+// `import`ed here like the rest of this file — it's bundled on demand with
+// esbuild (IIFE, no external deps left unresolved) and served as a plain
+// <script> from /assets/wallet-kit.js. Built once and cached; the source
+// only changes between server restarts.
+// ---------------------------------------------------------------------------
+
+let walletKitBundle: Promise<string> | null = null;
+function getWalletKitBundle(): Promise<string> {
+  if (!walletKitBundle) {
+    walletKitBundle = esbuild
+      .build({
+        entryPoints: [path.join(HERE, "wallet-kit-client.ts")],
+        bundle: true,
+        format: "iife",
+        platform: "browser",
+        target: "es2020",
+        write: false,
+        logLevel: "silent",
+      })
+      .then((result) => result.outputFiles[0]!.text);
+  }
+  return walletKitBundle;
+}
+
+// ---------------------------------------------------------------------------
 // Providers, oracle, settlement — Simulated and Live variants.
 // ---------------------------------------------------------------------------
 
@@ -252,7 +309,7 @@ console.log("Funding a Stellar testnet demo-USDC issuer (Friendbot)...");
 // Doubles as the "treasury": the account that issues an asset can send it
 // directly, with no trustline of its own — issuing IS just a payment.
 const issuer = Keypair.random();
-// Populated by demoWallet() below — settlement needs each receiving
+// Populated by generateDemoWallet() below — settlement needs each receiving
 // wallet's own keypair to sign the trustline it opens for itself.
 const walletByAddress = new Map<string, Keypair>();
 let stellarReady = false;
@@ -264,8 +321,13 @@ try {
   console.warn("⚠ Could not reach Stellar testnet/Friendbot — settlement will fall back to a simulated tx id:", error);
 }
 
-/** A fresh, Friendbot-funded Stellar address to receive the settlement. */
-async function demoWallet(): Promise<string> {
+/**
+ * A fresh, Friendbot-funded Stellar address to receive the settlement —
+ * offered as an opt-in fallback ("no wallet installed?") on the wallet step
+ * for people testing without a browser wallet extension. Never used unless
+ * explicitly requested; the primary path is Stellar Wallets Kit.
+ */
+async function generateDemoWallet(): Promise<string> {
   const kp = Keypair.random();
   if (stellarReady) {
     try {
@@ -400,7 +462,8 @@ function wizardShell(op: Op, lang: Lang, stepName: string, bodyHtml: string): st
   const dots = steps.map((_, i) => `<span class="dot${i === idx ? " active" : ""}"></span>`).join("");
   const opTitleKey = op === "buy" ? "opBuy" : op === "sell" ? "opSell" : "opQuote";
   const subtitleKey = op === "buy" ? "subtitleBuy" : op === "sell" ? "subtitleSell" : "subtitleQuote";
-  const stepLabelKey = stepName === "provider" ? "stepProvider" : stepName === "currency" ? "stepCurrency" : stepName === "method" ? "stepMethod" : "stepAmount";
+  const stepLabelKey =
+    stepName === "provider" ? "stepProvider" : stepName === "currency" ? "stepCurrency" : stepName === "method" ? "stepMethod" : stepName === "wallet" ? "stepWallet" : "stepAmount";
   return `<div style="width:100%;max-width:480px;box-sizing:border-box;margin:0 auto;background:var(--panel);border-radius:24px;padding:24px;font-family:Helvetica, Arial, sans-serif;color:var(--fg)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
       ${backBtn}
@@ -483,6 +546,27 @@ function renderQuoteAmountBody(state: WizardState, lang: Lang): string {
     <button onclick="submitStep()" style="${BUTTON_STYLE}">${t(lang, "getQuoteLabel")}</button>`;
 }
 
+/**
+ * Asks for the buyer's destination wallet before the final "amount" step
+ * creates the charge — connected via Stellar Wallets Kit (Freighter, xBull,
+ * Albedo, Rabet, Hana, Lobstr), never prefilled or assumed. A small opt-in
+ * fallback offers a Friendbot-funded test wallet for people without a
+ * browser wallet extension.
+ */
+function renderWalletBody(state: WizardState, lang: Lang): string {
+  const connected = !!state.wallet;
+  return `<div id="walletConnectCard" style="border:1px solid var(--border);border-radius:10px;padding:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px">
+    <div style="min-width:0">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">${t(lang, "walletLabel")}</div>
+      <div id="walletAddressText" style="font-size:14px;font-weight:700;font-family:ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${connected ? shortenAddress(state.wallet!) : t(lang, "walletNotConnected")}</div>
+    </div>
+    <button type="button" id="connectWalletBtn" onclick="connectWallet()" style="flex-shrink:0;background:${connected ? "transparent" : "var(--cosmos-button-bg)"};color:${connected ? "var(--cosmos-fg)" : "var(--cosmos-button-fg)"};border:${connected ? "1px solid var(--border)" : "none"};border-radius:10px;padding:11px 16px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">${connected ? t(lang, "changeWallet") : t(lang, "connectWallet")}</button>
+  </div>
+  ${connected ? "" : `<button type="button" id="demoWalletLink" onclick="useDemoWallet()" style="background:none;border:none;color:var(--muted);font-size:12px;text-decoration:underline;cursor:pointer;padding:0;margin-bottom:20px;display:block">${t(lang, "useDemoWallet")}</button>`}
+  <p style="color:var(--muted);font-size:12px;margin:${connected ? "0" : "8px"} 0 20px">${t(lang, "walletHint")}</p>
+  <button onclick="continueWallet()" id="walletContinueBtn" style="${BUTTON_STYLE}"${connected ? "" : " disabled"}>${t(lang, "continueLabel")}</button>`;
+}
+
 /** Live, two-way pay/receive quote: editing either field re-quotes the other via /api/quote-preview. */
 async function renderBuyAmountBody(state: WizardState, lang: Lang): Promise<string> {
   const currency = state.currency ?? "ARS";
@@ -512,11 +596,13 @@ async function renderStep(op: Op, stepName: string, state: WizardState, lang: La
         ? renderCurrencyBody(op, state, lang)
         : stepName === "method"
           ? renderMethodBody(state, lang)
-          : op === "sell"
-            ? renderSellAmountBody(state, lang)
-            : op === "quote"
-              ? renderQuoteAmountBody(state, lang)
-              : await renderBuyAmountBody(state, lang);
+          : stepName === "wallet"
+            ? renderWalletBody(state, lang)
+            : op === "sell"
+              ? renderSellAmountBody(state, lang)
+              : op === "quote"
+                ? renderQuoteAmountBody(state, lang)
+                : await renderBuyAmountBody(state, lang);
   return wizardShell(op, lang, stepName, body);
 }
 
@@ -647,16 +733,24 @@ const actions: Record<string, Action> = {
     const amount = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_FIAT_AMOUNT[currency];
     const lang: Lang = STRINGS[body.lang as Lang] ? body.lang : "en";
 
+    const wallet = typeof body.wallet === "string" ? body.wallet.trim() : "";
+    if (!wallet) throw new Error("Connect a destination wallet before checking out.");
+
     const order = await ramp.onramp({
       provider: providerName,
       amount,
       currency: toFiatCurrency(currency),
       spread: 0.02,
-      wallet: await demoWallet(),
+      wallet,
       method,
       description: "Buy USDC (demo)",
     });
     return { orderId: order.id, resultHtml: await renderPending(order, lang) };
+  },
+
+  /** Opt-in fallback for the wallet step's "no wallet installed?" link — a fresh, Friendbot-funded testnet address. */
+  async demoWallet() {
+    return { wallet: await generateDemoWallet() };
   },
 
   async confirm(body) {
@@ -754,6 +848,15 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     }
     return;
   }
+  if (req.method === "GET" && url.pathname === "/assets/wallet-kit.js") {
+    try {
+      const code = await getWalletKitBundle();
+      res.writeHead(200, { "content-type": "application/javascript; charset=utf-8", "cache-control": "no-cache" }).end(code);
+    } catch (error) {
+      res.writeHead(500, { "content-type": "application/javascript" }).end(`console.error(${JSON.stringify(`wallet-kit bundle failed: ${String(error)}`)});`);
+    }
+    return;
+  }
   if (req.method === "GET" && url.pathname === "/api/step") {
     const op: Op = url.searchParams.get("op") === "sell" ? "sell" : url.searchParams.get("op") === "quote" ? "quote" : "buy";
     const stepName = url.searchParams.get("step") || "provider";
@@ -764,6 +867,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       provider: url.searchParams.get("provider") || null,
       currency: currencyParam ? parseCurrency(currencyParam) : null,
       method: url.searchParams.get("method") === "qr" ? "qr" : url.searchParams.get("method") === "link" ? "link" : null,
+      wallet: url.searchParams.get("wallet") || null,
       amount: amountParam ? Number(amountParam) : null,
     };
     const providers = providersFor(op).map((p) => ({ name: p.name, currencies: p.currencies }));
@@ -970,13 +1074,14 @@ const PAGE = /* html */ `<!doctype html>
   <button id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path></svg></button>
 </div>
 <main>
-  <div id="view">${await renderStep("buy", "provider", { provider: null, currency: null, method: null, amount: null }, "en")}</div>
+  <div id="view">${await renderStep("buy", "provider", { provider: null, currency: null, method: null, wallet: null, amount: null }, "en")}</div>
   <div id="actions"></div>
 </main>
 <div id="fab-wrap">
   <div id="fab-menu" class="fab-menu"></div>
   <button id="fab" onclick="toggleFab()" aria-label="Choose operation">☰</button>
 </div>
+<script src="/assets/wallet-kit.js"></script>
 <script>
   var STEPS = ${JSON.stringify(STEPS)};
   var STR_DICT = ${JSON.stringify(STRINGS)};
@@ -984,7 +1089,7 @@ const PAGE = /* html */ `<!doctype html>
   var op = 'buy';
   var uiMode = 'wizard';
   var stepIdx = 0;
-  var state = { provider: null, currency: null, method: null, amount: null };
+  var state = { provider: null, currency: null, method: null, wallet: null, amount: null };
   var orderId = null;
   // 'buy' | 'sell' | null — which kind of order (if any) is currently pending
   // completion, i.e. showing a ReceivePayment view and being polled/confirmable.
@@ -1108,6 +1213,7 @@ const PAGE = /* html */ `<!doctype html>
     var qs = new URLSearchParams({ op: op, step: stepName, lang: lang, provider: state.provider || '' });
     if (state.currency) qs.set('currency', state.currency);
     if (state.method) qs.set('method', state.method);
+    if (state.wallet) qs.set('wallet', state.wallet);
     if (state.amount != null) qs.set('amount', String(state.amount));
     try {
       var res = await fetch('/api/step?' + qs.toString());
@@ -1163,7 +1269,7 @@ const PAGE = /* html */ `<!doctype html>
         var methods = methodsFor(value, currencies[0]);
         if (methods.length === 1) {
           state.method = methods[0];
-          stepIdx = STEPS[op].indexOf('amount');
+          stepIdx = op === 'buy' ? STEPS[op].indexOf('wallet') : STEPS[op].indexOf('amount');
           await fetchStep();
           return;
         }
@@ -1176,7 +1282,7 @@ const PAGE = /* html */ `<!doctype html>
       var methods2 = methodsFor(state.provider, value);
       if (methods2.length === 1) {
         state.method = methods2[0];
-        stepIdx = STEPS[op].indexOf('amount');
+        stepIdx = op === 'buy' ? STEPS[op].indexOf('wallet') : STEPS[op].indexOf('amount');
         await fetchStep();
         return;
       }
@@ -1185,7 +1291,7 @@ const PAGE = /* html */ `<!doctype html>
     await fetchStep();
   }
 
-  var STEP_FIELDS = ['provider', 'currency', 'method', 'amount'];
+  var STEP_FIELDS = ['provider', 'currency', 'method', 'wallet', 'amount'];
 
   function goBack() {
     if (stepIdx === 0) return;
@@ -1206,6 +1312,70 @@ const PAGE = /* html */ `<!doctype html>
     fetchStep();
   }
 
+  function shortenAddress(addr) {
+    if (!addr || addr.length <= 12) return addr || '';
+    return addr.slice(0, 4) + '…' + addr.slice(-4);
+  }
+
+  /** Shared by connectWallet() and useDemoWallet(): reflects a newly connected address in the wallet card and unlocks Continue. */
+  function applyWalletConnected(address) {
+    state.wallet = address;
+    var textEl = document.getElementById('walletAddressText');
+    if (textEl) textEl.textContent = shortenAddress(address);
+    var connectBtn = document.getElementById('connectWalletBtn');
+    if (connectBtn) {
+      connectBtn.style.background = 'transparent';
+      connectBtn.style.color = 'var(--cosmos-fg)';
+      connectBtn.style.border = '1px solid var(--border)';
+    }
+    var demoLink = document.getElementById('demoWalletLink');
+    if (demoLink) demoLink.remove();
+    var continueBtn = document.getElementById('walletContinueBtn');
+    if (continueBtn) continueBtn.disabled = false;
+  }
+
+  /** Opens Stellar Wallets Kit's auth modal (wallet picker + connect + fetch address) via the bundle loaded from /assets/wallet-kit.js. */
+  async function connectWallet() {
+    var btn = document.getElementById('connectWalletBtn');
+    if (btn && btn.disabled) return;
+    setButtonLoading(btn, true);
+    try {
+      var address = await window.connectStellarWallet();
+      applyWalletConnected(address);
+      setButtonLoading(btn, false, STR('changeWallet'));
+    } catch (err) {
+      setButtonLoading(btn, false);
+      showToast(STR('walletConnectError'), 'error');
+    }
+  }
+
+  /** Opt-in fallback for people without a browser wallet extension — never used unless explicitly clicked. */
+  async function useDemoWallet() {
+    var btn = document.getElementById('demoWalletLink');
+    if (!btn || btn.disabled) return;
+    setButtonLoading(btn, true);
+    try {
+      var res = await fetch('/api/demoWallet', { method: 'POST', body: '{}' });
+      var data = await res.json();
+      if (data.error || !data.wallet) throw new Error(data.error || 'no wallet');
+      applyWalletConnected(data.wallet);
+      var connectBtn = document.getElementById('connectWalletBtn');
+      setButtonLoading(connectBtn, false, STR('changeWallet'));
+    } catch (err) {
+      setButtonLoading(btn, false);
+      showToast(STR('walletConnectError'), 'error');
+    }
+  }
+
+  function continueWallet() {
+    if (!state.wallet) {
+      showToast(STR('walletRequired'), 'error');
+      return;
+    }
+    stepIdx++;
+    fetchStep();
+  }
+
   async function submitStep() {
     if (op === 'buy') {
       var payInput = document.getElementById('payAmount');
@@ -1221,7 +1391,7 @@ const PAGE = /* html */ `<!doctype html>
     try {
       var res = await fetch('/api/' + endpoint, {
         method: 'POST',
-        body: JSON.stringify({ provider: state.provider, currency: state.currency, method: state.method, amount: state.amount, lang: lang }),
+        body: JSON.stringify({ provider: state.provider, currency: state.currency, method: state.method, wallet: state.wallet, amount: state.amount, lang: lang }),
       });
       var data = await res.json();
       if (data.error) {
@@ -1330,7 +1500,7 @@ const PAGE = /* html */ `<!doctype html>
     orderId = null;
     pendingKind = null;
     stopPolling();
-    state = { provider: null, currency: null, method: null, amount: null };
+    state = { provider: null, currency: null, method: null, wallet: null, amount: null };
     document.getElementById('actions').innerHTML = '';
     document.getElementById('fab-menu').classList.remove('open');
     fetchStep();
