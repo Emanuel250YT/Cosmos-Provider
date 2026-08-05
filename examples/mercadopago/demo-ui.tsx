@@ -60,14 +60,13 @@ import {
 import { ReceivePayment, PaymentConfirmation, PaymentMethodCard, PaymentOptionRow, SummaryRow } from "../../src/react";
 import { chargeToQrProps, rampOrderToDetailRows, quoteToSummaryRows } from "../../src/react/server";
 import { createMockMercadoPago } from "../helpers/mock-mercadopago";
-import { randomAmount } from "../helpers/random";
 
 const PORT = 4000;
 const WEBHOOK_SECRET = "demo-mp-secret";
 
 type Op = "buy" | "sell" | "quote";
 type Method = "qr" | "link";
-type Currency = "ARS" | "BRL";
+type Currency = "ARS" | "BRL" | "MXN";
 type Lang = "en" | "es" | "pt";
 type Mode = "simulated" | "live";
 interface WizardState {
@@ -77,10 +76,12 @@ interface WizardState {
   amount: number | null;
 }
 
-/** Test-amount bounds for this demo. Fiat: BRL for PIX QR, ARS for the link. Crypto: the "sell" flow. */
-const BRL_TEST_RANGE = [5, 30] as const;
-const ARS_TEST_RANGE = [1500, 5000] as const;
-const CRYPTO_TEST_RANGE = [10, 100] as const;
+/** Sensible unprompted starting points (~10 USD) — not enforced limits, just a reasonable prefill per currency. */
+const DEFAULT_FIAT_AMOUNT: Record<Currency, number> = { ARS: 2000, BRL: 20, MXN: 300 };
+const DEFAULT_CRYPTO_AMOUNT = 10;
+
+const parseCurrency = (v: unknown): Currency => (v === "ARS" ? "ARS" : v === "MXN" ? "MXN" : "BRL");
+const toFiatCurrency = (c: Currency): FiatCurrency => (c === "ARS" ? FiatCurrency.ARS : c === "MXN" ? FiatCurrency.MXN : FiatCurrency.BRL);
 
 const STEPS: Record<Op, string[]> = {
   buy: ["provider", "currency", "method", "amount"],
@@ -105,6 +106,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     back: "‹ Back",
     ars: "Argentine Pesos (ARS)",
     brl: "Brazilian Real (BRL)",
+    mxn: "Mexican Peso (MXN)",
     pix: "PIX QR",
     link: "Payment link",
     amountFiat: "Amount",
@@ -112,7 +114,6 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     ivePaid: "I've paid",
     iveSent: "I've sent the USDC",
     checkStatus: "Check status",
-    simulatePaymentSandbox: "Simulate payment (Etherfuse sandbox)",
     stillPending: "Still pending — try again in a moment.",
     startOver: "Start over",
     waitingPayment: "Waiting for payment",
@@ -120,6 +121,9 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     step: "Step",
     of: "of",
     chooseOperation: "Choose an operation",
+    youPay: "You pay",
+    youReceive: "You receive",
+    rateNote: "1 USDC ≈",
   },
   es: {
     opBuy: "Comprar USDC",
@@ -137,6 +141,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     back: "‹ Atrás",
     ars: "Pesos Argentinos (ARS)",
     brl: "Real Brasileño (BRL)",
+    mxn: "Peso Mexicano (MXN)",
     pix: "QR PIX",
     link: "Link de pago",
     amountFiat: "Monto",
@@ -144,7 +149,6 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     ivePaid: "Ya pagué",
     iveSent: "Ya envié el USDC",
     checkStatus: "Verificar estado",
-    simulatePaymentSandbox: "Simular pago (sandbox de Etherfuse)",
     stillPending: "Todavía pendiente — probá de nuevo en un momento.",
     startOver: "Empezar de nuevo",
     waitingPayment: "Esperando el pago",
@@ -152,6 +156,9 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     step: "Paso",
     of: "de",
     chooseOperation: "Elegí una operación",
+    youPay: "Pagás",
+    youReceive: "Recibís",
+    rateNote: "1 USDC ≈",
   },
   pt: {
     opBuy: "Comprar USDC",
@@ -169,6 +176,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     back: "‹ Voltar",
     ars: "Pesos Argentinos (ARS)",
     brl: "Real Brasileiro (BRL)",
+    mxn: "Peso Mexicano (MXN)",
     pix: "QR PIX",
     link: "Link de pagamento",
     amountFiat: "Valor",
@@ -176,7 +184,6 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     ivePaid: "Já paguei",
     iveSent: "Já enviei o USDC",
     checkStatus: "Verificar status",
-    simulatePaymentSandbox: "Simular pagamento (sandbox da Etherfuse)",
     stillPending: "Ainda pendente — tente novamente em instantes.",
     startOver: "Começar de novo",
     waitingPayment: "Aguardando pagamento",
@@ -184,12 +191,20 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     step: "Etapa",
     of: "de",
     chooseOperation: "Escolha uma operação",
+    youPay: "Você paga",
+    youReceive: "Você recebe",
+    rateNote: "1 USDC ≈",
   },
 };
 const t = (lang: Lang, key: string): string => STRINGS[lang]?.[key] ?? key;
 
-const clamp = (n: number, min: number, max: number): number => Math.min(max, Math.max(min, n));
-const providerLabel = (name: string): string => name.charAt(0).toUpperCase() + name.slice(1).replace(/[-_]/g, " ");
+const PROVIDER_DISPLAY_NAME: Record<string, string> = {
+  etherfuse: "Etherfuse",
+  "mercadopago-br": "Mercado Pago Brasil",
+  "mercadopago-ar": "Mercado Pago Argentina",
+};
+const providerLabel = (name: string): string => PROVIDER_DISPLAY_NAME[name] ?? name.charAt(0).toUpperCase() + name.slice(1).replace(/[-_]/g, " ");
+const currencyLabelKey = (c: Currency): string => (c === "ARS" ? "ars" : c === "MXN" ? "mxn" : "brl");
 const initials = (name: string): string => name.slice(0, 2).toUpperCase();
 const methodsForProvider = (providerName: string, currency: Currency): Method[] => {
   // Etherfuse never returns a raw PIX code to render our own QR from — it's
@@ -292,9 +307,15 @@ const settlementFn: SettlementFn = async ({ order, wallet, amount, asset }) => {
   return { txId: `0xdemo${Date.now()}` };
 };
 
+// Etherfuse settles both Brazil (PIX/BRL) and Mexico (SPEI/MXN), so both
+// currencies show up in the picker — but note `EtherfuseProvider.createCharge`
+// only builds PIX charges today (see its docstring), so a "buy" checkout in
+// MXN will surface a clear error until that adapter grows SPEI support.
 const etherfuseProvider = new EtherfuseProvider({
   apiKey: process.env.ETHERFUSE_API_KEY ?? "",
   environment: "sandbox",
+  regions: ["BR", "MX"],
+  currencies: [FiatCurrency.BRL, FiatCurrency.MXN],
   logoUrl: "/assets/logo/etherfuse.ico",
 });
 
@@ -415,11 +436,13 @@ function renderProviderBody(op: Op, mode: Mode, state: WizardState): string {
   return `<div style="display:flex;flex-direction:column;gap:8px">${rows}</div>`;
 }
 
-function renderCurrencyBody(state: WizardState, lang: Lang): string {
-  const rows = (["ARS", "BRL"] as const)
+function renderCurrencyBody(op: Op, mode: Mode, state: WizardState, lang: Lang): string {
+  const provider = providersFor(op, mode).find((p) => p.name === state.provider);
+  const currencies = (provider?.currencies.length ? (provider.currencies as Currency[]) : (["ARS", "BRL"] as const)) as readonly Currency[];
+  const rows = currencies
     .map((c) => {
       const row = renderToStaticMarkup(
-        <PaymentOptionRow label={t(lang, c === "ARS" ? "ars" : "brl")} selected={c === state.currency} radioColor={c === state.currency ? "#4F46E5" : "#D1D5DB"} />,
+        <PaymentOptionRow label={t(lang, currencyLabelKey(c))} selected={c === state.currency} radioColor={c === state.currency ? "#4F46E5" : "#D1D5DB"} />,
       );
       return `<div class="pickable" onclick="selectStep('currency','${c}')">${row}</div>`;
     })
@@ -440,36 +463,60 @@ function renderMethodBody(state: WizardState, lang: Lang): string {
   return `<div style="display:flex;flex-direction:column;gap:8px">${rows}</div>`;
 }
 
-function renderAmountBody(op: Op, state: WizardState, lang: Lang): string {
-  const fieldStyle = "width:100%;box-sizing:border-box;border:1px solid #E5E7EB;border-radius:10px;padding:12px 14px;font-size:14px;margin-bottom:20px";
-  const buttonStyle = "width:100%;background:#111827;color:#fff;border:none;border-radius:16px;padding:16px;font-size:16px;font-weight:700;cursor:pointer";
+const FIELD_STYLE = "width:100%;box-sizing:border-box;border:1px solid #E5E7EB;border-radius:10px;padding:12px 14px;font-size:14px;margin-bottom:20px";
+const FIELD_STYLE_TIGHT = "width:100%;box-sizing:border-box;border:1px solid #E5E7EB;border-radius:10px;padding:12px 14px;font-size:14px;margin-bottom:12px";
+const BUTTON_STYLE = "width:100%;background:#111827;color:#fff;border:none;border-radius:16px;padding:16px;font-size:16px;font-weight:700;cursor:pointer";
 
-  if (op === "sell") {
-    const [min, max] = CRYPTO_TEST_RANGE;
-    const value = clamp(state.amount ?? randomAmount(min, max), min, max);
-    return `<label style="display:block;font-size:12px;color:#6B7280;font-weight:600;margin-bottom:6px">${t(lang, "amountCrypto")} (${min}–${max})</label>
-      <input id="amountInput" type="number" min="${min}" max="${max}" step="0.01" value="${value}" style="${fieldStyle}" />
-      <button onclick="submitStep()" style="${buttonStyle}">${t(lang, "continueLabel")}</button>`;
-  }
-
-  const currency = state.currency ?? "ARS";
-  const range = currency === "BRL" ? BRL_TEST_RANGE : ARS_TEST_RANGE;
-  const value = clamp(state.amount ?? randomAmount(range[0], range[1]), range[0], range[1]);
-  const label = op === "quote" ? t(lang, "getQuoteLabel") : t(lang, "continueLabel");
-  return `<label style="display:block;font-size:12px;color:#6B7280;font-weight:600;margin-bottom:6px">${t(lang, "amountFiat")} (${currency}, ${range[0]}–${range[1]})</label>
-    <input id="amountInput" type="number" min="${range[0]}" max="${range[1]}" step="0.01" value="${value}" style="${fieldStyle}" />
-    <button onclick="submitStep()" style="${buttonStyle}">${label}</button>`;
+function renderSellAmountBody(state: WizardState, lang: Lang): string {
+  const value = state.amount ?? DEFAULT_CRYPTO_AMOUNT;
+  return `<label style="display:block;font-size:12px;color:#6B7280;font-weight:600;margin-bottom:6px">${t(lang, "amountCrypto")}</label>
+    <input id="amountInput" type="number" min="0" step="0.01" value="${value}" style="${FIELD_STYLE}" />
+    <button onclick="submitStep()" style="${BUTTON_STYLE}">${t(lang, "continueLabel")}</button>`;
 }
 
-function renderStep(op: Op, stepName: string, state: WizardState, lang: Lang, mode: Mode): string {
+function renderQuoteAmountBody(state: WizardState, lang: Lang): string {
+  const currency = state.currency ?? "ARS";
+  const value = state.amount ?? DEFAULT_FIAT_AMOUNT[currency];
+  return `<label style="display:block;font-size:12px;color:#6B7280;font-weight:600;margin-bottom:6px">${t(lang, "amountFiat")} (${currency})</label>
+    <input id="amountInput" type="number" min="0" step="0.01" value="${value}" style="${FIELD_STYLE}" />
+    <button onclick="submitStep()" style="${BUTTON_STYLE}">${t(lang, "getQuoteLabel")}</button>`;
+}
+
+/** Live, two-way pay/receive quote: editing either field re-quotes the other via /api/quote-preview. */
+async function renderBuyAmountBody(mode: Mode, state: WizardState, lang: Lang): Promise<string> {
+  const ramp = rampFor(mode);
+  const currency = state.currency ?? "ARS";
+  const fiatDefault = state.amount ?? DEFAULT_FIAT_AMOUNT[currency];
+  let quote: QuoteBreakdown | null = null;
+  try {
+    quote = await ramp.quote({ direction: "onramp", currency: toFiatCurrency(currency), amount: fiatDefault, spread: 0.02 });
+  } catch {
+    quote = null;
+  }
+  const fiatValue = quote ? quote.fiatAmount : fiatDefault;
+  const cryptoValue = quote ? quote.cryptoAmount : "";
+  const rate = quote ? quote.effectiveRate.toFixed(4) : "…";
+  return `<label style="display:block;font-size:12px;color:#6B7280;font-weight:600;margin-bottom:6px">${t(lang, "youPay")} (${currency})</label>
+    <input id="payAmount" type="number" min="0" step="0.01" value="${fiatValue}" oninput="scheduleQuote('fiat')" style="${FIELD_STYLE_TIGHT}" />
+    <label style="display:block;font-size:12px;color:#6B7280;font-weight:600;margin-bottom:6px">${t(lang, "youReceive")} (USDC)</label>
+    <input id="receiveAmount" type="number" min="0" step="0.000001" value="${cryptoValue}" oninput="scheduleQuote('crypto')" style="${FIELD_STYLE_TIGHT}" />
+    <p id="rateNote" style="text-align:center;color:#9CA3AF;font-size:12px;margin:0 0 20px">${t(lang, "rateNote")} ${rate} ${currency}</p>
+    <button onclick="submitStep()" style="${BUTTON_STYLE}">${t(lang, "continueLabel")}</button>`;
+}
+
+async function renderStep(op: Op, stepName: string, state: WizardState, lang: Lang, mode: Mode): Promise<string> {
   const body =
     stepName === "provider"
       ? renderProviderBody(op, mode, state)
       : stepName === "currency"
-        ? renderCurrencyBody(state, lang)
+        ? renderCurrencyBody(op, mode, state, lang)
         : stepName === "method"
           ? renderMethodBody(state, lang)
-          : renderAmountBody(op, state, lang);
+          : op === "sell"
+            ? renderSellAmountBody(state, lang)
+            : op === "quote"
+              ? renderQuoteAmountBody(state, lang)
+              : await renderBuyAmountBody(mode, state, lang);
   return wizardShell(op, lang, stepName, body);
 }
 
@@ -590,17 +637,16 @@ const actions: Record<string, Action> = {
     const mode: Mode = body.mode === "live" ? "live" : "simulated";
     const ramp = rampFor(mode);
     const providerName = ramp.providers.some((p) => p.name === body.provider) ? body.provider : ramp.providers[0]!.name;
-    const currency: Currency = body.currency === "ARS" ? "ARS" : "BRL";
+    const currency = parseCurrency(body.currency);
     const method: Method = currency === "BRL" && body.method === "qr" ? "qr" : "link";
-    const range = currency === "BRL" ? BRL_TEST_RANGE : ARS_TEST_RANGE;
     const requested = Number(body.amount);
-    const amount = Number.isFinite(requested) ? clamp(requested, range[0], range[1]) : randomAmount(range[0], range[1]);
+    const amount = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_FIAT_AMOUNT[currency];
     const lang: Lang = STRINGS[body.lang as Lang] ? body.lang : "en";
 
     const order = await ramp.onramp({
       provider: providerName,
       amount,
-      currency: currency === "BRL" ? FiatCurrency.BRL : FiatCurrency.ARS,
+      currency: toFiatCurrency(currency),
       spread: 0.02,
       wallet: await demoWallet(),
       method,
@@ -619,15 +665,15 @@ const actions: Record<string, Action> = {
     const mode: Mode = body.mode === "live" ? "live" : "simulated";
     const ramp = rampFor(mode);
     const providerName = providersFor("sell", mode).some((p) => p.name === body.provider) ? body.provider : providersFor("sell", mode)[0]!.name;
-    const currency: Currency = body.currency === "ARS" ? "ARS" : "BRL";
+    const currency = parseCurrency(body.currency);
     const requested = Number(body.amount);
-    const cryptoAmount = Number.isFinite(requested) ? clamp(requested, CRYPTO_TEST_RANGE[0], CRYPTO_TEST_RANGE[1]) : randomAmount(CRYPTO_TEST_RANGE[0], CRYPTO_TEST_RANGE[1]);
+    const cryptoAmount = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_CRYPTO_AMOUNT;
     const lang: Lang = STRINGS[body.lang as Lang] ? body.lang : "en";
 
     const order = await ramp.offramp({
       provider: providerName,
       cryptoAmount,
-      currency: currency === "BRL" ? FiatCurrency.BRL : FiatCurrency.ARS,
+      currency: toFiatCurrency(currency),
       spread: 0.02,
       destination: { email: "seller@example.com" },
     });
@@ -646,14 +692,13 @@ const actions: Record<string, Action> = {
   async quote(body) {
     const mode: Mode = body.mode === "live" ? "live" : "simulated";
     const ramp = rampFor(mode);
-    const currency: Currency = body.currency === "ARS" ? "ARS" : "BRL";
-    const range = currency === "BRL" ? BRL_TEST_RANGE : ARS_TEST_RANGE;
+    const currency = parseCurrency(body.currency);
     const requested = Number(body.amount);
-    const amount = Number.isFinite(requested) ? clamp(requested, range[0], range[1]) : randomAmount(range[0], range[1]);
+    const amount = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_FIAT_AMOUNT[currency];
 
     const quote = await ramp.quote({
       direction: "onramp",
-      currency: currency === "BRL" ? FiatCurrency.BRL : FiatCurrency.ARS,
+      currency: toFiatCurrency(currency),
       amount,
       spread: 0.02,
     });
@@ -701,14 +746,36 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     const stepName = url.searchParams.get("step") || "provider";
     const lang: Lang = STRINGS[url.searchParams.get("lang") as Lang] ? (url.searchParams.get("lang") as Lang) : "en";
     const amountParam = url.searchParams.get("amount");
+    const currencyParam = url.searchParams.get("currency");
     const state: WizardState = {
       provider: url.searchParams.get("provider") || null,
-      currency: url.searchParams.get("currency") === "BRL" ? "BRL" : url.searchParams.get("currency") === "ARS" ? "ARS" : null,
+      currency: currencyParam ? parseCurrency(currencyParam) : null,
       method: url.searchParams.get("method") === "qr" ? "qr" : url.searchParams.get("method") === "link" ? "link" : null,
       amount: amountParam ? Number(amountParam) : null,
     };
     const providers = providersFor(op, mode).map((p) => ({ name: p.name, currencies: p.currencies }));
-    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ html: renderStep(op, stepName, state, lang, mode), providers }));
+    const html = await renderStep(op, stepName, state, lang, mode);
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ html, providers }));
+    return;
+  }
+  /** Live re-quote for the buy amount step: pass either `amount` (fiat) or `cryptoAmount`, get the other back. Provider-agnostic — pricing is oracle-based. */
+  if (req.method === "GET" && url.pathname === "/api/quote-preview") {
+    const mode: Mode = url.searchParams.get("mode") === "live" ? "live" : "simulated";
+    const currency = parseCurrency(url.searchParams.get("currency"));
+    const amountParam = url.searchParams.get("amount");
+    const cryptoParam = url.searchParams.get("cryptoAmount");
+    try {
+      const quote = await rampFor(mode).quote({
+        direction: "onramp",
+        currency: toFiatCurrency(currency),
+        amount: amountParam ? Number(amountParam) : undefined,
+        cryptoAmount: cryptoParam ? Number(cryptoParam) : undefined,
+        spread: 0.02,
+      });
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ quote }));
+    } catch (error) {
+      res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: String((error as Error).message ?? error) }));
+    }
     return;
   }
   if (req.method === "POST" && url.pathname.startsWith("/api/")) {
@@ -778,7 +845,6 @@ const PAGE = /* html */ `<!doctype html>
     display: block; margin: 16px auto 0; background: none; border: none;
     color: var(--muted); font-size: 13px; text-decoration: underline; cursor: pointer; font: inherit;
   }
-  #hint { text-align: center; color: var(--muted); font-size: 12px; margin-top: 16px; }
   #pending-note { text-align: center; color: #B45309; font-size: 12px; margin-top: 8px; }
 
   /* Top-right: language dropdown + theme toggle. */
@@ -786,13 +852,13 @@ const PAGE = /* html */ `<!doctype html>
 
   #theme-toggle {
     width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-    padding: 0; font-size: 16px; line-height: 1; border: 1px solid var(--border); background: var(--panel); cursor: pointer;
+    padding: 0; border: 1px solid var(--border); background: var(--panel); color: var(--fg); cursor: pointer;
   }
 
   .dropdown { position: relative; }
   .dropdown-toggle {
     display: flex; align-items: center; gap: 6px; height: 34px; border-radius: 999px; border: 1px solid var(--border);
-    background: var(--panel); padding: 0 10px; cursor: pointer; font: inherit; color: var(--fg);
+    background: var(--panel); padding: 0 10px; cursor: pointer; font: inherit; font-size: 13px; color: var(--fg);
   }
   .dropdown-toggle img { width: 18px; height: 13px; display: block; border-radius: 2px; }
   .dropdown-toggle .chev { font-size: 10px; color: var(--muted); }
@@ -836,20 +902,20 @@ const PAGE = /* html */ `<!doctype html>
   <div class="dropdown" id="lang-switch">
     <button class="dropdown-toggle" id="langToggle" onclick="toggleLangMenu()" aria-haspopup="true" aria-label="Language">
       <img id="langFlag" src="/assets/flag/us.svg" alt="" />
+      <span id="langName">English</span>
       <span class="chev">⌄</span>
     </button>
     <div class="dropdown-menu" id="langMenu">
       <button class="active" data-lang="en" onclick="setLang('en')"><img src="/assets/flag/us.svg" alt="" /><span>English</span></button>
-      <button data-lang="es" onclick="setLang('es')"><img src="/assets/flag/es.svg" alt="" /><span>Español</span></button>
+      <button data-lang="es" onclick="setLang('es')"><img src="/assets/flag/ar.svg" alt="" /><span>Español</span></button>
       <button data-lang="pt" onclick="setLang('pt')"><img src="/assets/flag/br.svg" alt="" /><span>Português</span></button>
     </div>
   </div>
-  <button id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">☀️</button>
+  <button id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path></svg></button>
 </div>
 <main>
-  <div id="view">${renderStep("buy", "provider", { provider: null, currency: null, method: null, amount: null }, "en", "simulated")}</div>
+  <div id="view">${await renderStep("buy", "provider", { provider: null, currency: null, method: null, amount: null }, "en", "simulated")}</div>
   <div id="actions"></div>
-  <p id="hint">This demo runs against simulated payment providers — no real charges.</p>
 </main>
 <div id="fab-wrap">
   <div id="fab-menu" class="fab-menu"></div>
@@ -875,7 +941,7 @@ const PAGE = /* html */ `<!doctype html>
   }
   function currenciesFor(provider) {
     var meta = PROVIDER_META[provider];
-    return meta ? meta.currencies : ['ARS', 'BRL'];
+    return meta ? meta.currencies : ['ARS', 'BRL', 'MXN'];
   }
 
   function swapView(containerId, html) {
@@ -903,6 +969,32 @@ const PAGE = /* html */ `<!doctype html>
       state.provider = null;
     }
     swapView('view', data.html);
+  }
+
+  var quoteDebounce = null;
+  var lastEdited = 'fiat';
+
+  function scheduleQuote(field) {
+    lastEdited = field;
+    clearTimeout(quoteDebounce);
+    quoteDebounce = setTimeout(fetchQuotePreview, 350);
+  }
+
+  async function fetchQuotePreview() {
+    var payInput = document.getElementById('payAmount');
+    var receiveInput = document.getElementById('receiveAmount');
+    if (!payInput || !receiveInput) return;
+    var qs = new URLSearchParams({ currency: state.currency || 'ARS', mode: mode });
+    if (lastEdited === 'fiat') qs.set('amount', payInput.value || '0');
+    else qs.set('cryptoAmount', receiveInput.value || '0');
+    var res = await fetch('/api/quote-preview?' + qs.toString());
+    var data = await res.json();
+    if (data.error || !data.quote) return;
+    if (lastEdited === 'fiat') receiveInput.value = data.quote.cryptoAmount;
+    else payInput.value = data.quote.fiatAmount;
+    state.amount = Number(payInput.value);
+    var note = document.getElementById('rateNote');
+    if (note) note.textContent = STR('rateNote') + ' ' + data.quote.effectiveRate.toFixed(4) + ' ' + (state.currency || 'ARS');
   }
 
   async function selectStep(field, value) {
@@ -936,18 +1028,35 @@ const PAGE = /* html */ `<!doctype html>
     await fetchStep();
   }
 
+  var STEP_FIELDS = ['provider', 'currency', 'method', 'amount'];
+
   function goBack() {
     if (stepIdx === 0) return;
     stepIdx--;
-    var name = STEPS[op][stepIdx];
-    if (name === 'currency' && currenciesFor(state.provider).length === 1) stepIdx--;
-    else if (name === 'method' && methodsFor(state.provider, state.currency).length === 1) stepIdx--;
+    // Unwind every step that would've been auto-skipped going forward (single
+    // currency / single method), so we land exactly where the forward flow
+    // branched instead of on a view that was never actually shown.
+    while (stepIdx > 0) {
+      var name = STEPS[op][stepIdx];
+      if (name === 'currency' && currenciesFor(state.provider).length === 1) { stepIdx--; continue; }
+      if (name === 'method' && methodsFor(state.provider, state.currency).length === 1) { stepIdx--; continue; }
+      break;
+    }
+    // The step we land on (and everything after it) is being re-chosen — clear
+    // it so it doesn't render as still-selected.
+    var landingIdx = STEP_FIELDS.indexOf(STEPS[op][stepIdx]);
+    STEP_FIELDS.slice(landingIdx).forEach(function (f) { state[f] = null; });
     fetchStep();
   }
 
   async function submitStep() {
-    var amountInput = document.getElementById('amountInput');
-    state.amount = amountInput ? Number(amountInput.value) : null;
+    if (op === 'buy') {
+      var payInput = document.getElementById('payAmount');
+      state.amount = payInput ? Number(payInput.value) : state.amount;
+    } else {
+      var amountInput = document.getElementById('amountInput');
+      state.amount = amountInput ? Number(amountInput.value) : null;
+    }
     var btn = document.querySelector('#view button:not(.back)');
     if (btn) btn.disabled = true;
     var endpoint = op === 'buy' ? 'checkout' : op === 'sell' ? 'sell' : 'quote';
@@ -964,11 +1073,7 @@ const PAGE = /* html */ `<!doctype html>
     uiMode = 'result';
     orderId = data.orderId || null;
     swapView('view', data.resultHtml);
-    var confirmLabel = op === 'buy'
-      ? (state.provider.indexOf('etherfuse') === 0 ? STR('simulatePaymentSandbox') : mode === 'live' ? STR('checkStatus') : STR('ivePaid'))
-      : op === 'sell'
-        ? (state.provider.indexOf('etherfuse') === 0 ? STR('simulatePaymentSandbox') : mode === 'live' ? STR('checkStatus') : STR('iveSent'))
-        : null;
+    var confirmLabel = op === 'buy' ? STR('ivePaid') : op === 'sell' ? STR('iveSent') : null;
     if (confirmLabel) {
       var confirmFn = op === 'sell' ? 'confirmSell()' : 'confirmBuy()';
       swapView('actions', '<div id="confirmBar"><button onclick="' + confirmFn + '">' + confirmLabel + '</button></div><button id="restart" onclick="location.reload()">' + STR('startOver') + '</button>');
@@ -1001,11 +1106,14 @@ const PAGE = /* html */ `<!doctype html>
   function confirmBuy() { pollConfirm('confirm'); }
   function confirmSell() { pollConfirm('sellConfirm'); }
 
-  var LANG_FLAG = { en: 'us', es: 'es', pt: 'br' };
+  // Argentina's flag stands in for Spanish — this demo's Spanish-speaking market is LatAm, not Spain.
+  var LANG_FLAG = { en: 'us', es: 'ar', pt: 'br' };
+  var LANG_NAME = { en: 'English', es: 'Español', pt: 'Português' };
 
   function setLang(l) {
     lang = l;
     document.getElementById('langFlag').src = '/assets/flag/' + LANG_FLAG[l] + '.svg';
+    document.getElementById('langName').textContent = LANG_NAME[l];
     document.querySelectorAll('#langMenu button').forEach(function (btn) {
       btn.classList.toggle('active', btn.getAttribute('data-lang') === l);
     });
@@ -1017,11 +1125,14 @@ const PAGE = /* html */ `<!doctype html>
     document.getElementById('langMenu').classList.toggle('open');
   }
 
+  var SUN_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path></svg>';
+  var MOON_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
+
   function toggleTheme() {
     var html = document.documentElement;
     var next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     html.setAttribute('data-theme', next);
-    document.getElementById('theme-toggle').textContent = next === 'dark' ? '🌙' : '☀️';
+    document.getElementById('theme-toggle').innerHTML = next === 'dark' ? MOON_ICON : SUN_ICON;
   }
 
   function toggleFab() {
