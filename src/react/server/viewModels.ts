@@ -51,7 +51,7 @@ export function quoteToSummaryRows(quote: QuoteBreakdown): SummaryRowProps[] {
 export function rampOrderToDetailRows(order: RampOrderData): DetailRowProps[] {
   const rows: DetailRowProps[] = [
     { label: "Order ID", value: order.id },
-    { label: "Status", value: order.status, valueColor: STATUS_COLOR[order.status] ?? "#111827" },
+    { label: "Status", value: order.status, valueColor: STATUS_COLOR[order.status] ?? "var(--cosmos-fg, #111827)" },
     { label: "Provider", value: order.provider },
   ];
   if (order.chargeId) rows.push({ label: "Payment ID", value: order.chargeId });
@@ -86,7 +86,7 @@ export async function depositInstructionsToQrProps(deposit: DepositInstructions,
 /** Transaction-detail rows for an Etherfuse `APIOrder` (onramp/offramp). */
 export function apiOrderToDetailRows(order: APIOrder): DetailRowProps[] {
   const rows: DetailRowProps[] = [{ label: "Order ID", value: order.orderId }];
-  if (order.status) rows.push({ label: "Status", value: order.status, valueColor: STATUS_COLOR[order.status] ?? "#111827" });
+  if (order.status) rows.push({ label: "Status", value: order.status, valueColor: STATUS_COLOR[order.status] ?? "var(--cosmos-fg, #111827)" });
   if (order.sourceAsset && order.targetAsset) rows.push({ label: "Pair", value: `${order.sourceAsset} → ${order.targetAsset}` });
   if (order.amountInFiat) rows.push({ label: "Amount", value: order.amountInFiat });
   if (order.exchangeRate) rows.push({ label: "Rate", value: order.exchangeRate });

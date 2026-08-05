@@ -12,11 +12,11 @@ export interface ReceivePaymentProps {
   qr?: Pick<QRCodeProps, "src" | "value">;
   /**
    * Marks `qr` as encoding `paymentLink` itself rather than a direct-pay
-   * code (PIX and the like) — swaps the default title to "Continue from
-   * your phone". Only needed when you pre-render the link's QR yourself
-   * (server-side, passing `qr.src`); when `qr` is omitted and `paymentLink`
-   * is set, this is inferred automatically and the QR renders client-side
-   * from `paymentLink`.
+   * code (PIX and the like) — shows a small "Continue from your phone"
+   * caption under the QR instead of the fixed "Scan to pay" title. Only
+   * needed when you pre-render the link's QR yourself (server-side, passing
+   * `qr.src`); when `qr` is omitted and `paymentLink` is set, this is
+   * inferred automatically and the QR renders client-side from `paymentLink`.
    */
   qrIsPaymentLink?: boolean;
   /** Shown instead of (or alongside) the QR for hosted-checkout charges. */
@@ -29,7 +29,7 @@ export interface ReceivePaymentProps {
   locale?: Locale;
 }
 
-/** "Scan to pay" screen: a real payment QR (e.g. PIX) or, for link-based checkouts, a QR of the link itself so the buyer can continue from their phone. Amount, live status, and order details round it out. */
+/** "Scan to pay" screen: a real payment QR (e.g. PIX) or, for link-based checkouts, a QR of the link itself with a small "continue from your phone" caption. Amount, live status, and order details round it out. Colors are set via `--cosmos-*` CSS custom properties (with light-mode fallbacks baked in), so a page that defines dark-mode overrides for them re-themes this automatically. */
 export function ReceivePayment({
   locale = "en",
   title,
@@ -47,10 +47,10 @@ export function ReceivePayment({
   const autoLinkQr = !qr && paymentLink ? { value: paymentLink } : undefined;
   const effectiveQr = qr ?? autoLinkQr;
   const isLinkQr = qrIsPaymentLink || (!qr && !!autoLinkQr);
-  const resolvedTitle = title ?? (isLinkQr ? t(locale, "continueFromPhone") : t(locale, "scanToPay"));
+  const resolvedTitle = title ?? t(locale, "scanToPay");
 
   return (
-    <div style={{ ...screenCardStyle, fontFamily: "Helvetica, Arial, sans-serif", background: "#fff", borderRadius: 24, padding: 20, color: "#111827" }}>
+    <div style={{ ...screenCardStyle, fontFamily: "Helvetica, Arial, sans-serif", background: "var(--cosmos-panel, #fff)", borderRadius: 24, padding: 20, color: "var(--cosmos-fg, #111827)" }}>
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 18, fontWeight: 700 }}>{resolvedTitle}</div>
         <div style={{ fontSize: 32, fontWeight: 800, marginTop: 8 }}>{amount}</div>
@@ -74,10 +74,13 @@ export function ReceivePayment({
       </div>
 
       {effectiveQr ? (
-        <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>
-          <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, padding: 16 }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 20 }}>
+          <div style={{ background: "#fff", border: "1px solid var(--cosmos-border, #E5E7EB)", borderRadius: 16, padding: 16 }}>
             <QRCode {...effectiveQr} size={220} />
           </div>
+          {isLinkQr ? (
+            <div style={{ fontSize: 12, color: "var(--cosmos-muted, #9CA3AF)", marginTop: 10, textAlign: "center" }}>{t(locale, "continueFromPhone")}</div>
+          ) : null}
         </div>
       ) : null}
 
@@ -91,8 +94,8 @@ export function ReceivePayment({
             textAlign: "center",
             width: "100%",
             boxSizing: "border-box",
-            background: "#111827",
-            color: "#fff",
+            background: "var(--cosmos-button-bg, #111827)",
+            color: "var(--cosmos-button-fg, #fff)",
             borderRadius: 16,
             padding: 16,
             fontSize: 15,
@@ -109,14 +112,25 @@ export function ReceivePayment({
         <button
           type="button"
           onClick={onCopyCode}
-          style={{ width: "100%", background: "#F3F4F6", color: "#111827", border: "none", borderRadius: 16, padding: 14, fontSize: 14, fontWeight: 700, marginTop: 10, cursor: "pointer" }}
+          style={{
+            width: "100%",
+            background: "var(--cosmos-surface-alt, #F3F4F6)",
+            color: "var(--cosmos-fg, #111827)",
+            border: "none",
+            borderRadius: 16,
+            padding: 14,
+            fontSize: 14,
+            fontWeight: 700,
+            marginTop: 10,
+            cursor: "pointer",
+          }}
         >
           {copyLabel}
         </button>
       ) : null}
 
       {rows?.length ? (
-        <div style={{ marginTop: 20, paddingTop: 12, borderTop: "1px dashed #E5E7EB" }}>
+        <div style={{ marginTop: 20, paddingTop: 12, borderTop: "1px dashed var(--cosmos-border, #E5E7EB)" }}>
           {rows.map((row, i) => (
             <DetailRow key={i} {...row} />
           ))}

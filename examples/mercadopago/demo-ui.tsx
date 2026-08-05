@@ -30,6 +30,18 @@
  * in Live mode polls the provider's real charge status instead of
  * simulating a webhook — it only completes once someone has genuinely paid.
  *
+ * Once an order is created, the page polls `/api/status` (a pure read —
+ * no side effects) every 5s waiting for it to land as `completed`, same as
+ * a real integration waiting on its webhook handler to update the order
+ * store. That's "Real" confirmation mode (the default, no button — just a
+ * wait). The FAB's "Test" confirmation mode additionally surfaces a manual
+ * "mark as paid" control that calls the existing forced-confirm actions
+ * (`/api/confirm`, `/api/sellConfirm` — the mock-webhook/sandbox-deposit
+ * simulation), so you can jump straight to the next stage instead of
+ * waiting on a webhook this local demo has no way to receive on its own.
+ * This is unrelated to the Simulated/Live provider-credentials axis above —
+ * it only controls how THIS page decides an already-created order is done.
+ *
  * Two things are deliberately real even in Simulated mode — see
  * examples/mercadopago/settlement-demo.ts for the full rationale:
  * - The rate: `CoinGeckoOracle`, no fixed/mocked number.
@@ -111,17 +123,19 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     link: "Payment link",
     amountFiat: "Amount",
     amountCrypto: "Amount (USDC)",
-    ivePaid: "I've paid",
-    iveSent: "I've sent the USDC",
     checkStatus: "Check status",
     stillPending: "Still pending — try again in a moment.",
     genericError: "Something went wrong. Please try again.",
-    startOver: "Start over",
     waitingPayment: "Waiting for payment",
     waitingCrypto: "Waiting for your USDC",
     step: "Step",
     of: "of",
     chooseOperation: "Choose an operation",
+    confirmationMode: "Confirmation mode",
+    modeReal: "Real — wait for webhook",
+    modeDev: "Test — mark as paid manually",
+    markAsPaid: "Mark as paid (simulate)",
+    markAsReceived: "Mark as received (simulate)",
     youPay: "You pay",
     youReceive: "You receive",
     rateNote: "1 USDC ≈",
@@ -147,17 +161,19 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     link: "Link de pago",
     amountFiat: "Monto",
     amountCrypto: "Monto (USDC)",
-    ivePaid: "Ya pagué",
-    iveSent: "Ya envié el USDC",
     checkStatus: "Verificar estado",
     stillPending: "Todavía pendiente — probá de nuevo en un momento.",
     genericError: "Algo salió mal. Probá de nuevo.",
-    startOver: "Empezar de nuevo",
     waitingPayment: "Esperando el pago",
     waitingCrypto: "Esperando tu USDC",
     step: "Paso",
     of: "de",
     chooseOperation: "Elegí una operación",
+    confirmationMode: "Modo de confirmación",
+    modeReal: "Real — esperar webhook",
+    modeDev: "Prueba — marcar como pagado a mano",
+    markAsPaid: "Marcar como pagado (simular)",
+    markAsReceived: "Marcar como recibido (simular)",
     youPay: "Pagás",
     youReceive: "Recibís",
     rateNote: "1 USDC ≈",
@@ -183,17 +199,19 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     link: "Link de pagamento",
     amountFiat: "Valor",
     amountCrypto: "Valor (USDC)",
-    ivePaid: "Já paguei",
-    iveSent: "Já enviei o USDC",
     checkStatus: "Verificar status",
     stillPending: "Ainda pendente — tente novamente em instantes.",
     genericError: "Algo deu errado. Tente novamente.",
-    startOver: "Começar de novo",
     waitingPayment: "Aguardando pagamento",
     waitingCrypto: "Aguardando seu USDC",
     step: "Etapa",
     of: "de",
     chooseOperation: "Escolha uma operação",
+    confirmationMode: "Modo de confirmação",
+    modeReal: "Real — aguardar webhook",
+    modeDev: "Teste — marcar como pago manualmente",
+    markAsPaid: "Marcar como pago (simular)",
+    markAsReceived: "Marcar como recebido (simular)",
     youPay: "Você paga",
     youReceive: "Você recebe",
     rateNote: "1 USDC ≈",
@@ -311,9 +329,8 @@ const settlementFn: SettlementFn = async ({ order, wallet, amount, asset }) => {
 };
 
 // Etherfuse settles both Brazil (PIX/BRL) and Mexico (SPEI/MXN), so both
-// currencies show up in the picker — but note `EtherfuseProvider.createCharge`
-// only builds PIX charges today (see its docstring), so a "buy" checkout in
-// MXN will surface a clear error until that adapter grows SPEI support.
+// currencies show up in the picker and both build a real charge — BRL
+// delivers Asset.TESOURO, MXN delivers Asset.CETES (see EtherfuseProvider's docstring).
 const etherfuseProvider = new EtherfuseProvider({
   apiKey: process.env.ETHERFUSE_API_KEY ?? "",
   environment: "sandbox",
@@ -406,15 +423,15 @@ function wizardShell(op: Op, lang: Lang, stepName: string, bodyHtml: string): st
   const opTitleKey = op === "buy" ? "opBuy" : op === "sell" ? "opSell" : "opQuote";
   const subtitleKey = op === "buy" ? "subtitleBuy" : op === "sell" ? "subtitleSell" : "subtitleQuote";
   const stepLabelKey = stepName === "provider" ? "stepProvider" : stepName === "currency" ? "stepCurrency" : stepName === "method" ? "stepMethod" : "stepAmount";
-  return `<div style="width:100%;max-width:420px;box-sizing:border-box;margin:0 auto;background:#fff;border-radius:24px;padding:24px;font-family:Helvetica, Arial, sans-serif;color:#111827">
+  return `<div style="width:100%;max-width:420px;box-sizing:border-box;margin:0 auto;background:var(--panel);border-radius:24px;padding:24px;font-family:Helvetica, Arial, sans-serif;color:var(--fg)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
       ${backBtn}
-      <span style="font-size:11px;color:#9CA3AF">${t(lang, "step")} ${idx + 1} ${t(lang, "of")} ${steps.length}</span>
+      <span style="font-size:11px;color:var(--muted)">${t(lang, "step")} ${idx + 1} ${t(lang, "of")} ${steps.length}</span>
     </div>
     <div style="display:flex;gap:4px;justify-content:center;margin-bottom:16px">${dots}</div>
     <h1 style="font-size:20px;margin:0 0 4px;text-align:center">${t(lang, opTitleKey)}</h1>
-    <p style="color:#6B7280;margin:0 0 20px;font-size:13px;text-align:center">${t(lang, subtitleKey)}</p>
-    <div style="font-size:12px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">${t(lang, stepLabelKey)}</div>
+    <p style="color:var(--muted);margin:0 0 20px;font-size:13px;text-align:center">${t(lang, subtitleKey)}</p>
+    <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">${t(lang, stepLabelKey)}</div>
     ${bodyHtml}
   </div>`;
 }
@@ -430,7 +447,7 @@ function renderProviderBody(op: Op, mode: Mode, state: WizardState): string {
           title={providerLabel(p.name)}
           subtitle={p.currencies.length ? p.currencies.join(" · ") : p.regions.join(" · ")}
           selected={p.name === state.provider}
-          radioColor={p.name === state.provider ? "#111827" : "#D1D5DB"}
+          radioColor={p.name === state.provider ? "var(--cosmos-fg, #111827)" : "var(--cosmos-radio, #D1D5DB)"}
         />,
       );
       return `<div class="pickable" onclick="selectStep('provider','${p.name}')">${card}</div>`;
@@ -445,7 +462,7 @@ function renderCurrencyBody(op: Op, mode: Mode, state: WizardState, lang: Lang):
   const rows = currencies
     .map((c) => {
       const row = renderToStaticMarkup(
-        <PaymentOptionRow label={t(lang, currencyLabelKey(c))} selected={c === state.currency} radioColor={c === state.currency ? "#4F46E5" : "#D1D5DB"} />,
+        <PaymentOptionRow label={t(lang, currencyLabelKey(c))} selected={c === state.currency} radioColor={c === state.currency ? "#4F46E5" : "var(--cosmos-radio, #D1D5DB)"} />,
       );
       return `<div class="pickable" onclick="selectStep('currency','${c}')">${row}</div>`;
     })
@@ -458,7 +475,7 @@ function renderMethodBody(state: WizardState, lang: Lang): string {
   const rows = methods
     .map((m) => {
       const row = renderToStaticMarkup(
-        <PaymentOptionRow label={t(lang, m === "qr" ? "pix" : "link")} selected={m === state.method} radioColor={m === state.method ? "#4F46E5" : "#D1D5DB"} />,
+        <PaymentOptionRow label={t(lang, m === "qr" ? "pix" : "link")} selected={m === state.method} radioColor={m === state.method ? "#4F46E5" : "var(--cosmos-radio, #D1D5DB)"} />,
       );
       return `<div class="pickable" onclick="selectStep('method','${m}')">${row}</div>`;
     })
@@ -466,13 +483,16 @@ function renderMethodBody(state: WizardState, lang: Lang): string {
   return `<div style="display:flex;flex-direction:column;gap:8px">${rows}</div>`;
 }
 
-const FIELD_STYLE = "width:100%;box-sizing:border-box;border:1px solid #E5E7EB;border-radius:10px;padding:12px 14px;font-size:14px;margin-bottom:20px";
-const FIELD_STYLE_TIGHT = "width:100%;box-sizing:border-box;border:1px solid #E5E7EB;border-radius:10px;padding:12px 14px;font-size:14px;margin-bottom:12px";
-const BUTTON_STYLE = "width:100%;background:#111827;color:#fff;border:none;border-radius:16px;padding:16px;font-size:16px;font-weight:700;cursor:pointer";
+const FIELD_STYLE =
+  "width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:14px;margin-bottom:20px;background:var(--panel);color:var(--fg)";
+const FIELD_STYLE_TIGHT =
+  "width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:14px;margin-bottom:12px;background:var(--panel);color:var(--fg)";
+const BUTTON_STYLE =
+  "width:100%;background:var(--cosmos-button-bg);color:var(--cosmos-button-fg);border:none;border-radius:16px;padding:16px;font-size:16px;font-weight:700;cursor:pointer";
 
 function renderSellAmountBody(state: WizardState, lang: Lang): string {
   const value = state.amount ?? DEFAULT_CRYPTO_AMOUNT;
-  return `<label style="display:block;font-size:12px;color:#6B7280;font-weight:600;margin-bottom:6px">${t(lang, "amountCrypto")}</label>
+  return `<label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px">${t(lang, "amountCrypto")}</label>
     <input id="amountInput" type="number" min="0" step="0.01" value="${value}" style="${FIELD_STYLE}" />
     <button onclick="submitStep()" style="${BUTTON_STYLE}">${t(lang, "continueLabel")}</button>`;
 }
@@ -480,7 +500,7 @@ function renderSellAmountBody(state: WizardState, lang: Lang): string {
 function renderQuoteAmountBody(state: WizardState, lang: Lang): string {
   const currency = state.currency ?? "ARS";
   const value = state.amount ?? DEFAULT_FIAT_AMOUNT[currency];
-  return `<label style="display:block;font-size:12px;color:#6B7280;font-weight:600;margin-bottom:6px">${t(lang, "amountFiat")} (${currency})</label>
+  return `<label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px">${t(lang, "amountFiat")} (${currency})</label>
     <input id="amountInput" type="number" min="0" step="0.01" value="${value}" style="${FIELD_STYLE}" />
     <button onclick="submitStep()" style="${BUTTON_STYLE}">${t(lang, "getQuoteLabel")}</button>`;
 }
@@ -499,11 +519,11 @@ async function renderBuyAmountBody(mode: Mode, state: WizardState, lang: Lang): 
   const fiatValue = quote ? quote.fiatAmount : fiatDefault;
   const cryptoValue = quote ? quote.cryptoAmount : "";
   const rate = quote ? quote.effectiveRate.toFixed(4) : "…";
-  return `<label style="display:block;font-size:12px;color:#6B7280;font-weight:600;margin-bottom:6px">${t(lang, "youPay")} (${currency})</label>
+  return `<label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px">${t(lang, "youPay")} (${currency})</label>
     <input id="payAmount" type="number" min="0" step="0.01" value="${fiatValue}" oninput="scheduleQuote('fiat')" style="${FIELD_STYLE_TIGHT}" />
-    <label style="display:block;font-size:12px;color:#6B7280;font-weight:600;margin-bottom:6px">${t(lang, "youReceive")} (USDC)</label>
+    <label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px">${t(lang, "youReceive")} (USDC)</label>
     <input id="receiveAmount" type="number" min="0" step="0.000001" value="${cryptoValue}" oninput="scheduleQuote('crypto')" style="${FIELD_STYLE_TIGHT}" />
-    <p id="rateNote" style="text-align:center;color:#9CA3AF;font-size:12px;margin:0 0 20px">${t(lang, "rateNote")} ${rate} ${currency}</p>
+    <p id="rateNote" style="text-align:center;color:var(--muted);font-size:12px;margin:0 0 20px">${t(lang, "rateNote")} ${rate} ${currency}</p>
     <button onclick="submitStep()" style="${BUTTON_STYLE}">${t(lang, "continueLabel")}</button>`;
 }
 
@@ -579,7 +599,7 @@ function renderReceipt(order: RampOrderData): string {
 /** A quote-only summary — no order is created. */
 function renderQuoteResult(quote: QuoteBreakdown): string {
   return renderToStaticMarkup(
-    <div style={{ width: "100%", maxWidth: 420, boxSizing: "border-box", margin: "0 auto", background: "#fff", borderRadius: 16, padding: 20, fontFamily: "Helvetica, Arial, sans-serif", color: "#111827" }}>
+    <div style={{ width: "100%", maxWidth: 420, boxSizing: "border-box", margin: "0 auto", background: "var(--panel, #fff)", borderRadius: 16, padding: 20, fontFamily: "Helvetica, Arial, sans-serif", color: "var(--fg, #111827)" }}>
       <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
         {quote.asset} · {quote.currency}
       </div>
@@ -671,6 +691,24 @@ const actions: Record<string, Action> = {
   async confirm(body) {
     const mode: Mode = body.mode === "live" ? "live" : "simulated";
     return confirmOrder(mode, body.orderId);
+  },
+
+  /**
+   * Pure read for the "Real" confirmation mode's 5s poll — unlike `confirm`/
+   * `sellConfirm`, this never forces a payment or crypto-received event, it
+   * only reports whatever the order's current status already is. A real
+   * integration would land the same state via its webhook handler updating
+   * the order store; polling this is how the page notices without one.
+   */
+  async status(body) {
+    const mode: Mode = body.mode === "live" ? "live" : "simulated";
+    const order = await rampFor(mode).getOrder(body.orderId);
+    if (!order) throw new Error("Order not found.");
+    if (order.status === "completed") return { done: true, resultHtml: renderReceipt(order) };
+    if (order.status === "failed" || order.status === "expired" || order.status === "canceled") {
+      return { done: true, failed: true };
+    }
+    return { done: false };
   },
 
   /** Creates an offramp order (crypto → fiat) and returns the "waiting for your USDC" view. */
@@ -834,9 +872,27 @@ const PAGE = /* html */ `<!doctype html>
   * { box-sizing: border-box; }
   :root {
     --bg: #F3F4F6; --fg: #111827; --muted: #6B7280; --panel: #fff; --border: #E5E7EB;
+    /* cosmos-providers/react screens read these (with light-mode fallbacks baked
+       into each var() call, so they're optional for any other consumer) — aliasing
+       them to the vars above means one theme definition drives both this page's
+       own markup and the library's server-rendered screens. */
+    --cosmos-bg-soft: #F7F7F8;
+    --cosmos-panel: var(--panel);
+    --cosmos-fg: var(--fg);
+    --cosmos-muted: var(--muted);
+    --cosmos-border: var(--border);
+    --cosmos-button-bg: #111827;
+    --cosmos-button-fg: #fff;
+    --cosmos-surface-alt: #F3F4F6;
+    --cosmos-radio: #D1D5DB;
   }
   html[data-theme="dark"] {
     --bg: #0f1220; --fg: #e8e9f0; --muted: #9aa0b8; --panel: #171b31; --border: #2d3560;
+    --cosmos-bg-soft: #1b2040;
+    --cosmos-button-bg: #e8e9f0;
+    --cosmos-button-fg: #0f1220;
+    --cosmos-surface-alt: #232a4d;
+    --cosmos-radio: #3a4270;
   }
   body {
     font: 14px/1.5 system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--fg);
@@ -846,9 +902,9 @@ const PAGE = /* html */ `<!doctype html>
   main { width: 100%; max-width: 420px; }
   .pickable { cursor: pointer; }
   .pickable:hover { filter: brightness(0.98); }
-  .dot { width: 6px; height: 6px; border-radius: 50%; background: #E5E7EB; }
-  .dot.active { background: #111827; }
-  button.back { background: none; border: none; color: #6B7280; font-size: 12px; cursor: pointer; padding: 0; font: inherit; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); }
+  .dot.active { background: var(--fg); }
+  button.back { background: none; border: none; color: var(--muted); font-size: 12px; cursor: pointer; padding: 0; font: inherit; }
   #confirmBar button {
     display: block; width: 100%; padding: 14px; border-radius: 16px; border: none;
     background: #16A34A; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; font: inherit;
@@ -859,10 +915,6 @@ const PAGE = /* html */ `<!doctype html>
     border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; animation: btnSpin .6s linear infinite;
   }
   @keyframes btnSpin { to { transform: rotate(360deg); } }
-  #restart {
-    display: block; margin: 16px auto 0; background: none; border: none;
-    color: var(--muted); font-size: 13px; text-decoration: underline; cursor: pointer; font: inherit;
-  }
   #pending-note { text-align: center; color: #B45309; font-size: 12px; margin-top: 8px; }
 
   /* Toasts (errors / confirmations) */
@@ -919,17 +971,18 @@ const PAGE = /* html */ `<!doctype html>
   /* Operation picker FAB (bottom-right) */
   #fab-wrap { position: fixed; right: 20px; bottom: 20px; z-index: 50; }
   #fab {
-    width: 56px; height: 56px; border-radius: 50%; background: #111827; color: #fff; border: none;
+    width: 56px; height: 56px; border-radius: 50%; background: var(--cosmos-button-bg); color: var(--cosmos-button-fg); border: none;
     font-size: 20px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,.18);
   }
   .fab-menu {
     position: absolute; bottom: 68px; right: 0; background: var(--panel); border-radius: 12px;
-    box-shadow: 0 8px 24px rgba(0,0,0,.14); padding: 6px; display: none; flex-direction: column; gap: 2px; min-width: 180px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.14); padding: 6px; display: none; flex-direction: column; gap: 2px; min-width: 200px;
   }
   .fab-menu.open { display: flex; }
   .fab-menu .menu-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; padding: 6px 10px 2px; }
   .fab-menu button { background: none; border: none; text-align: left; padding: 10px 12px; border-radius: 8px; font-size: 13px; cursor: pointer; font: inherit; color: var(--fg); }
   .fab-menu button:hover, .fab-menu button.current { background: rgba(127,127,127,.15); }
+  .menu-divider { height: 1px; background: var(--border); margin: 6px 4px; }
 
   /* Animated transitions between steps/results */
   @keyframes viewEnter { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
@@ -973,6 +1026,14 @@ const PAGE = /* html */ `<!doctype html>
   var stepIdx = 0;
   var state = { provider: null, currency: null, method: null, amount: null };
   var orderId = null;
+  // 'buy' | 'sell' | null — which kind of order (if any) is currently pending
+  // completion, i.e. showing a ReceivePayment view and being polled/confirmable.
+  var pendingKind = null;
+  // Confirmation mode for a pending order: false = "Real" (only the 5s poll,
+  // genuinely waiting — no button), true = "Test" (poll PLUS a manual
+  // mark-as-complete control). See the file's top docstring.
+  var devMode = false;
+  var pollTimer = null;
   var PROVIDER_META = {};
   ${INITIAL_PROVIDERS}.forEach(function (p) { PROVIDER_META[p.name] = p; });
 
@@ -1022,6 +1083,53 @@ const PAGE = /* html */ `<!doctype html>
       btn.innerHTML = overrideLabel !== undefined ? overrideLabel : btn.dataset.label !== undefined ? btn.dataset.label : btn.innerHTML;
       delete btn.dataset.label;
     }
+  }
+
+  function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  function startPolling() {
+    stopPolling();
+    pollTimer = setInterval(checkStatus, 5000);
+  }
+
+  /** "Real" confirmation mode: a pure status read, no side effects — mirrors a real integration's webhook handler landing the order as completed. */
+  async function checkStatus() {
+    if (!orderId) { stopPolling(); return; }
+    try {
+      var res = await fetch('/api/status', { method: 'POST', body: JSON.stringify({ orderId: orderId, mode: mode }) });
+      var data = await res.json();
+      if (data.error || !data.done) return;
+      stopPolling();
+      pendingKind = null;
+      if (data.failed) {
+        showToast(STR('genericError'), 'error');
+        swapView('actions', '');
+        return;
+      }
+      swapView('view', data.resultHtml);
+      swapView('actions', '');
+    } catch (err) {
+      // Silent — network hiccup, the next 5s tick retries.
+    }
+  }
+
+  /** Renders (or clears) the "Test" mode manual mark-as-complete control for the current pending order — called after creating one and whenever the mode toggles while one is outstanding. */
+  function renderPendingActions() {
+    if (!pendingKind || !devMode) {
+      swapView('actions', '');
+      return;
+    }
+    var label = pendingKind === 'sell' ? STR('markAsReceived') : STR('markAsPaid');
+    var fn = pendingKind === 'sell' ? 'confirmSell()' : 'confirmBuy()';
+    swapView('actions', '<div id="confirmBar"><button onclick="' + fn + '">' + label + '</button></div>');
+  }
+
+  function setDevMode(next) {
+    devMode = next;
+    document.getElementById('fab-menu').classList.remove('open');
+    renderPendingActions();
   }
 
   function swapView(containerId, html) {
@@ -1163,20 +1271,17 @@ const PAGE = /* html */ `<!doctype html>
       }
       uiMode = 'result';
       orderId = data.orderId || null;
+      pendingKind = orderId && (op === 'buy' || op === 'sell') ? op : null;
       swapView('view', data.resultHtml);
-      var confirmLabel = op === 'buy' ? STR('ivePaid') : op === 'sell' ? STR('iveSent') : null;
-      if (confirmLabel) {
-        var confirmFn = op === 'sell' ? 'confirmSell()' : 'confirmBuy()';
-        swapView('actions', '<div id="confirmBar"><button onclick="' + confirmFn + '">' + confirmLabel + '</button></div><button id="restart" onclick="location.reload()">' + STR('startOver') + '</button>');
-      } else {
-        swapView('actions', '<button id="restart" onclick="location.reload()">' + STR('startOver') + '</button>');
-      }
+      renderPendingActions();
+      if (pendingKind) startPolling();
     } catch (err) {
       setButtonLoading(btn, false);
       showToast(STR('genericError'), 'error');
     }
   }
 
+  /** "Test" mode's manual mark-as-complete control — forces the payment/crypto-received simulation immediately instead of waiting on the 5s poll. */
   async function pollConfirm(endpoint) {
     var btn = document.querySelector('#confirmBar button');
     if (btn && btn.disabled) return;
@@ -1199,8 +1304,10 @@ const PAGE = /* html */ `<!doctype html>
         document.getElementById('actions').appendChild(p);
         return;
       }
+      stopPolling();
+      pendingKind = null;
       swapView('view', data.resultHtml);
-      swapView('actions', '<button id="restart" onclick="location.reload()">' + STR('startOver') + '</button>');
+      swapView('actions', '');
     } catch (err) {
       setButtonLoading(btn, false);
       showToast(STR('genericError'), 'error');
@@ -1248,7 +1355,11 @@ const PAGE = /* html */ `<!doctype html>
       '<div class="menu-label">' + STR('chooseOperation') + '</div>' +
       '<button class="' + (op === 'buy' ? 'current' : '') + '" onclick="chooseOp(\\'buy\\')">' + STR('opBuy') + '</button>' +
       '<button class="' + (op === 'sell' ? 'current' : '') + '" onclick="chooseOp(\\'sell\\')">' + STR('opSell') + '</button>' +
-      '<button class="' + (op === 'quote' ? 'current' : '') + '" onclick="chooseOp(\\'quote\\')">' + STR('opQuote') + '</button>';
+      '<button class="' + (op === 'quote' ? 'current' : '') + '" onclick="chooseOp(\\'quote\\')">' + STR('opQuote') + '</button>' +
+      '<div class="menu-divider"></div>' +
+      '<div class="menu-label">' + STR('confirmationMode') + '</div>' +
+      '<button class="' + (!devMode ? 'current' : '') + '" onclick="setDevMode(false)">' + STR('modeReal') + '</button>' +
+      '<button class="' + (devMode ? 'current' : '') + '" onclick="setDevMode(true)">' + STR('modeDev') + '</button>';
     menu.classList.add('open');
   }
 
@@ -1257,6 +1368,8 @@ const PAGE = /* html */ `<!doctype html>
     stepIdx = 0;
     uiMode = 'wizard';
     orderId = null;
+    pendingKind = null;
+    stopPolling();
     state = { provider: null, currency: null, method: null, amount: null };
     document.getElementById('actions').innerHTML = '';
     document.getElementById('fab-menu').classList.remove('open');
