@@ -17,16 +17,17 @@
  * `logoUrl` — reusing `ramp.providers` for the picker means adding a fourth
  * is the only change needed anywhere.
  *
- * Which credentials a provider talks to (sandbox vs. production) is a
- * property of how that provider was constructed (`.env`), not a runtime
- * toggle: each Mercado Pago account (BR, AR) uses its real `MP_*_ACCESS_TOKEN`
- * whenever `.env` sets one — sandbox or production, whatever's actually
- * configured there — and only falls back to the local, in-memory simulator
- * (`examples/helpers/mock-mercadopago`, safe/deterministic/no external calls)
- * when that env var is absent. Etherfuse always talks to its real sandbox API
- * (no mock exists for it) regardless. `mockBackedProviders` tracks which
- * provider names are on the local simulator, so `confirmOrder` knows whether
- * it's safe to fake a payment (mock) or must genuinely check status (real).
+ * Both Mercado Pago accounts (BR, AR) are always constructed with
+ * `sandbox: true` (see `buildMercadoPago`) — this is a *public* demo, so it
+ * can never place a genuine, chargeable production preference, no matter
+ * what `MP_*_ACCESS_TOKEN` ends up in `.env`. Each account uses that real
+ * token against the sandbox when `.env` sets one, and only falls back to the
+ * local, in-memory simulator (`examples/helpers/mock-mercadopago`,
+ * safe/deterministic/no external calls) when that env var is absent.
+ * Etherfuse always talks to its real sandbox API (no mock exists for it)
+ * regardless. `mockBackedProviders` tracks which provider names are on the
+ * local simulator, so `confirmOrder` knows whether it's safe to fake a
+ * payment (mock) or must genuinely check status (real sandbox).
  *
  * Once an order is created, the page polls `/api/status` (a pure read —
  * no side effects) every 5s waiting for it to land as `completed`, same as
@@ -38,9 +39,7 @@
  * Pago account (no sandbox "simulate payment" endpoint exists) it instead
  * polls the real charge status right now instead of waiting for the next
  * tick — never fabricated, so it only completes once someone has genuinely
- * paid. Because `MP_BR_ACCESS_TOKEN` can be a real production token, picking
- * Mercado Pago Brasil in this demo can create a genuine, chargeable
- * preference — know what you're testing against.
+ * paid the sandbox charge.
  *
  * Two things are deliberately real regardless of mock/live — see
  * examples/mercadopago/settlement-demo.ts for the full rationale:
@@ -430,7 +429,13 @@ const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "https://stellarsummit.l
 /** Provider names backed by the local simulator (no real `MP_*_ACCESS_TOKEN` configured) — safe to fake a payment for; anything else needs a genuine status check. */
 const mockBackedProviders = new Set<string>();
 
-/** A Mercado Pago account: real credentials from `.env` when set, else the local simulator (fake payments allowed — tracked in `mockBackedProviders`). */
+/**
+ * A Mercado Pago account: real credentials from `.env` when set, else the
+ * local simulator (fake payments allowed — tracked in `mockBackedProviders`).
+ * Always constructed with `sandbox: true` — same as payment-link.ts/pix.ts —
+ * so this public demo can never place a genuine, chargeable production
+ * preference no matter what token ends up in `.env`.
+ */
 function buildMercadoPago(name: string, region: string, currency: FiatCurrency, envToken: string | undefined, envWebhookSecret: string | undefined): MercadoPagoProvider {
   if (envToken) {
     return new MercadoPagoProvider({
@@ -438,6 +443,7 @@ function buildMercadoPago(name: string, region: string, currency: FiatCurrency, 
       regions: [region],
       currencies: [currency],
       accessToken: envToken,
+      sandbox: true,
       webhookSecret: envWebhookSecret,
       notificationUrl: `${PUBLIC_BASE_URL}/webhooks/${name}`,
       defaultPayerEmail: "buyer@example.com",
