@@ -129,8 +129,13 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     walletNotConnected: "No wallet connected",
     walletConnectError: "Couldn't connect your wallet. Please try again.",
     useDemoWallet: "No wallet installed? Use a test wallet",
-    walletHint: "Where should we send your USDC? Connect a Stellar wallet (Freighter, xBull, Albedo, Rabet, Hana, Lobstr).",
-    walletRequired: "Connect a wallet to continue.",
+    orLabel: "OR",
+    manualWalletLabel: "Paste a wallet address",
+    walletPlaceholder: "G... wallet address",
+    useThisAddress: "Use this address",
+    walletInvalid: "That doesn't look like a valid Stellar address.",
+    walletHint: "Where should we send the USDC? Connect your own wallet, or paste any Stellar address — handy when you're sending to someone else, like a remittance.",
+    walletRequired: "Connect or enter a wallet to continue.",
     amountFiat: "Amount",
     amountCrypto: "Amount (USDC)",
     checkStatus: "Check status",
@@ -175,8 +180,13 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     walletNotConnected: "Ninguna wallet conectada",
     walletConnectError: "No pudimos conectar tu wallet. Probá de nuevo.",
     useDemoWallet: "¿No tenés wallet instalada? Usar una de prueba",
-    walletHint: "¿A dónde enviamos tus USDC? Conectá una wallet de Stellar (Freighter, xBull, Albedo, Rabet, Hana, Lobstr).",
-    walletRequired: "Conectá una wallet para continuar.",
+    orLabel: "O",
+    manualWalletLabel: "Pegá una dirección de wallet",
+    walletPlaceholder: "Dirección de wallet (G...)",
+    useThisAddress: "Usar esta dirección",
+    walletInvalid: "Esa dirección de Stellar no parece válida.",
+    walletHint: "¿A dónde enviamos los USDC? Conectá tu propia wallet, o pegá cualquier dirección de Stellar — útil si estás enviando una remesa a otra persona.",
+    walletRequired: "Conectá o ingresá una wallet para continuar.",
     amountFiat: "Monto",
     amountCrypto: "Monto (USDC)",
     checkStatus: "Verificar estado",
@@ -221,8 +231,13 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     walletNotConnected: "Nenhuma wallet conectada",
     walletConnectError: "Não conseguimos conectar sua wallet. Tente novamente.",
     useDemoWallet: "Não tem wallet instalada? Usar uma de teste",
-    walletHint: "Para onde enviamos seu USDC? Conecte uma wallet Stellar (Freighter, xBull, Albedo, Rabet, Hana, Lobstr).",
-    walletRequired: "Conecte uma wallet para continuar.",
+    orLabel: "OU",
+    manualWalletLabel: "Cole um endereço de wallet",
+    walletPlaceholder: "Endereço da wallet (G...)",
+    useThisAddress: "Usar este endereço",
+    walletInvalid: "Esse endereço Stellar não parece válido.",
+    walletHint: "Para onde enviamos os USDC? Conecte sua própria wallet, ou cole qualquer endereço Stellar — útil se você estiver enviando uma remessa para outra pessoa.",
+    walletRequired: "Conecte ou informe uma wallet para continuar.",
     amountFiat: "Valor",
     amountCrypto: "Valor (USDC)",
     checkStatus: "Verificar status",
@@ -253,6 +268,9 @@ const providerLabel = (name: string): string => PROVIDER_DISPLAY_NAME[name] ?? n
 const currencyLabelKey = (c: Currency): string => (c === "ARS" ? "ars" : c === "MXN" ? "mxn" : "brl");
 const initials = (name: string): string => name.slice(0, 2).toUpperCase();
 const shortenAddress = (address: string): string => (address.length > 12 ? `${address.slice(0, 4)}…${address.slice(-4)}` : address);
+/** This demo's wallet address round-trips through the URL query string (`/api/step?wallet=...`) and back into server-rendered HTML — escape it wherever it's echoed, now that the server is reachable from the public internet. */
+const escapeHtml = (value: string): string =>
+  value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const methodsForProvider = (providerName: string, currency: Currency): Method[] => {
   // Etherfuse never returns a raw PIX code to render our own QR from — it's
   // always a hosted status-page link (see EtherfuseProvider's docstring).
@@ -399,6 +417,16 @@ const etherfuseProvider = new EtherfuseProvider({
 
 const oracle = () => new CoinGeckoOracle({ apiKey: process.env.COINGECKO_API_KEY });
 
+/**
+ * Base URL Mercado Pago's REAL webhooks get pointed at (`notification_url`
+ * on every charge a credentialed account creates) — `localhost` can't
+ * receive an inbound POST from Mercado Pago's servers, so this needs to be
+ * whatever public URL currently tunnels to this machine (e.g. localto.net,
+ * ngrok). Set `PUBLIC_BASE_URL` in `.env` when that tunnel URL changes.
+ * Mock-backed accounts ignore this entirely — they fake payments in-process.
+ */
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "https://stellarsummit.localto.net").replace(/\/+$/, "");
+
 /** Provider names backed by the local simulator (no real `MP_*_ACCESS_TOKEN` configured) — safe to fake a payment for; anything else needs a genuine status check. */
 const mockBackedProviders = new Set<string>();
 
@@ -411,6 +439,7 @@ function buildMercadoPago(name: string, region: string, currency: FiatCurrency, 
       currencies: [currency],
       accessToken: envToken,
       webhookSecret: envWebhookSecret,
+      notificationUrl: `${PUBLIC_BASE_URL}/webhooks/${name}`,
       defaultPayerEmail: "buyer@example.com",
       logoUrl: "/assets/logo/mp.svg",
     });
@@ -445,6 +474,9 @@ function isMockBacked(providerName: string): boolean {
 console.log(
   `Providers: ${ramp.providers.map((p) => (isMockBacked(p.name) ? p.name : `${p.name} (REAL)`)).join(", ")}`,
 );
+for (const name of [mercadoPagoBr.name, mercadoPagoAr.name]) {
+  if (!isMockBacked(name)) console.log(`Webhook notification URL for ${name}: ${PUBLIC_BASE_URL}/webhooks/${name}`);
+}
 
 // ---------------------------------------------------------------------------
 // Wizard steps — provider → currency → [method] → amount.
@@ -555,15 +587,27 @@ function renderQuoteAmountBody(state: WizardState, lang: Lang): string {
  */
 function renderWalletBody(state: WizardState, lang: Lang): string {
   const connected = !!state.wallet;
-  return `<div id="walletConnectCard" style="border:1px solid var(--border);border-radius:10px;padding:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px">
+  const addressText = connected ? escapeHtml(shortenAddress(state.wallet!)) : t(lang, "walletNotConnected");
+  const manualValue = connected ? escapeHtml(state.wallet!) : "";
+  return `<div id="walletConnectCard" style="border:1px solid var(--border);border-radius:10px;padding:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px">
     <div style="min-width:0">
       <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">${t(lang, "walletLabel")}</div>
-      <div id="walletAddressText" style="font-size:14px;font-weight:700;font-family:ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${connected ? shortenAddress(state.wallet!) : t(lang, "walletNotConnected")}</div>
+      <div id="walletAddressText" style="font-size:14px;font-weight:700;font-family:ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${addressText}</div>
     </div>
     <button type="button" id="connectWalletBtn" onclick="connectWallet()" style="flex-shrink:0;background:${connected ? "transparent" : "var(--cosmos-button-bg)"};color:${connected ? "var(--cosmos-fg)" : "var(--cosmos-button-fg)"};border:${connected ? "1px solid var(--border)" : "none"};border-radius:10px;padding:11px 16px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">${connected ? t(lang, "changeWallet") : t(lang, "connectWallet")}</button>
   </div>
-  ${connected ? "" : `<button type="button" id="demoWalletLink" onclick="useDemoWallet()" style="background:none;border:none;color:var(--muted);font-size:12px;text-decoration:underline;cursor:pointer;padding:0;margin-bottom:20px;display:block">${t(lang, "useDemoWallet")}</button>`}
-  <p style="color:var(--muted);font-size:12px;margin:${connected ? "0" : "8px"} 0 20px">${t(lang, "walletHint")}</p>
+  <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px">
+    <div style="flex:1;height:1px;background:var(--border)"></div>
+    <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">${t(lang, "orLabel")}</span>
+    <div style="flex:1;height:1px;background:var(--border)"></div>
+  </div>
+  <label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px">${t(lang, "manualWalletLabel")}</label>
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <input id="walletManualInput" type="text" placeholder="${t(lang, "walletPlaceholder")}" value="${manualValue}" style="${FIELD_STYLE_TIGHT};margin-bottom:0;flex:1;min-width:0" />
+    <button type="button" id="useManualWalletBtn" onclick="useManualWallet()" style="flex-shrink:0;background:var(--cosmos-surface-alt);color:var(--cosmos-fg);border:1px solid var(--border);border-radius:10px;padding:11px 16px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">${t(lang, "useThisAddress")}</button>
+  </div>
+  ${connected ? "" : `<button type="button" id="demoWalletLink" onclick="useDemoWallet()" style="background:none;border:none;color:var(--muted);font-size:12px;text-decoration:underline;cursor:pointer;padding:0;margin-bottom:16px;display:block">${t(lang, "useDemoWallet")}</button>`}
+  <p style="color:var(--muted);font-size:12px;margin:0 0 20px">${t(lang, "walletHint")}</p>
   <button onclick="continueWallet()" id="walletContinueBtn" style="${BUTTON_STYLE}"${connected ? "" : " disabled"}>${t(lang, "continueLabel")}</button>`;
 }
 
@@ -855,6 +899,30 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     } catch (error) {
       res.writeHead(500, { "content-type": "application/javascript" }).end(`console.error(${JSON.stringify(`wallet-kit bundle failed: ${String(error)}`)});`);
     }
+    return;
+  }
+  /**
+   * Real inbound Mercado Pago webhooks — this is what `notificationUrl`
+   * (see `buildMercadoPago`/`PUBLIC_BASE_URL`) points at. One route per
+   * registered provider name, e.g. /webhooks/mercadopago-br, since each
+   * account is a separate `MercadoPagoProvider` instance here (compare
+   * examples/mercadopago/webhook-server.ts, which uses a single
+   * multi-account provider and one fixed path instead).
+   */
+  if (req.method === "POST" && url.pathname.startsWith("/webhooks/")) {
+    const providerName = url.pathname.slice("/webhooks/".length);
+    let raw = "";
+    req.on("data", (chunk) => (raw += chunk));
+    req.on("end", async () => {
+      try {
+        const result = await ramp.handleWebhook(providerName, { body: raw, headers: req.headers, url: req.url });
+        console.log(`webhook [${providerName}]: ${result.outcome}`);
+        res.writeHead(result.status).end();
+      } catch (error) {
+        console.error(`webhook [${providerName}] error:`, error);
+        res.writeHead(500).end();
+      }
+    });
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/step") {
@@ -1317,11 +1385,17 @@ const PAGE = /* html */ `<!doctype html>
     return addr.slice(0, 4) + '…' + addr.slice(-4);
   }
 
-  /** Shared by connectWallet() and useDemoWallet(): reflects a newly connected address in the wallet card and unlocks Continue. */
+  function isValidStellarAddress(addr) {
+    return /^G[A-Z2-7]{55}$/.test(addr || '');
+  }
+
+  /** Shared by connectWallet(), useDemoWallet() and useManualWallet(): reflects the chosen address in the wallet card and unlocks Continue. */
   function applyWalletConnected(address) {
     state.wallet = address;
     var textEl = document.getElementById('walletAddressText');
     if (textEl) textEl.textContent = shortenAddress(address);
+    var manualInput = document.getElementById('walletManualInput');
+    if (manualInput) manualInput.value = address;
     var connectBtn = document.getElementById('connectWalletBtn');
     if (connectBtn) {
       connectBtn.style.background = 'transparent';
@@ -1365,6 +1439,17 @@ const PAGE = /* html */ `<!doctype html>
       setButtonLoading(btn, false);
       showToast(STR('walletConnectError'), 'error');
     }
+  }
+
+  /** For remittances/paying on someone else's behalf — no wallet connection needed, just a valid-looking address. */
+  function useManualWallet() {
+    var input = document.getElementById('walletManualInput');
+    var value = input ? input.value.trim() : '';
+    if (!isValidStellarAddress(value)) {
+      showToast(STR('walletInvalid'), 'error');
+      return;
+    }
+    applyWalletConnected(value);
   }
 
   function continueWallet() {
