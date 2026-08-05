@@ -58,7 +58,7 @@ import {
   type SettlementFn,
 } from "../../src/index";
 import { ReceivePayment, PaymentConfirmation, PaymentMethodCard, PaymentOptionRow, SummaryRow } from "../../src/react";
-import { chargeToQrProps, rampOrderToDetailRows, quoteToSummaryRows } from "../../src/react/server";
+import { chargeToQrProps, rampOrderToDetailRows, quoteToSummaryRows, renderQrDataUrl } from "../../src/react/server";
 import { createMockMercadoPago } from "../helpers/mock-mercadopago";
 
 const PORT = 4000;
@@ -115,6 +115,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     iveSent: "I've sent the USDC",
     checkStatus: "Check status",
     stillPending: "Still pending — try again in a moment.",
+    genericError: "Something went wrong. Please try again.",
     startOver: "Start over",
     waitingPayment: "Waiting for payment",
     waitingCrypto: "Waiting for your USDC",
@@ -150,6 +151,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     iveSent: "Ya envié el USDC",
     checkStatus: "Verificar estado",
     stillPending: "Todavía pendiente — probá de nuevo en un momento.",
+    genericError: "Algo salió mal. Probá de nuevo.",
     startOver: "Empezar de nuevo",
     waitingPayment: "Esperando el pago",
     waitingCrypto: "Esperando tu USDC",
@@ -185,6 +187,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     iveSent: "Já enviei o USDC",
     checkStatus: "Verificar status",
     stillPending: "Ainda pendente — tente novamente em instantes.",
+    genericError: "Algo deu errado. Tente novamente.",
     startOver: "Começar de novo",
     waitingPayment: "Aguardando pagamento",
     waitingCrypto: "Aguardando seu USDC",
@@ -524,16 +527,26 @@ async function renderStep(op: Op, stepName: string, state: WizardState, lang: La
 // Result views — all built from cosmos-providers/react's actual components.
 // ---------------------------------------------------------------------------
 
-/** The real QR/payment-link view a buyer would see. */
+/**
+ * The real QR/payment-link view a buyer would see: a PIX (or other direct)
+ * charge renders its own scannable QR; a hosted-checkout charge has no such
+ * code, so we render a QR of the payment link itself — "continue from your
+ * phone" — pre-rendered here server-side since this demo has no client-side
+ * React hydration to generate it on the fly.
+ */
 async function renderPending(order: RampOrderData, lang: Lang): Promise<string> {
   const qr = await chargeToQrProps(order.charge, { width: 240 });
+  const link = order.charge?.link;
+  const linkQr = !qr && link ? { src: await renderQrDataUrl(link, { width: 240 }) } : undefined;
   return renderToStaticMarkup(
     <ReceivePayment
+      locale={lang}
       amount={`${order.quote.fiatAmount.toFixed(2)} ${order.quote.currency}`}
       statusLabel={t(lang, "waitingPayment")}
       statusColor="#9CA3AF"
-      qr={qr ?? undefined}
-      paymentLink={!qr ? order.charge?.link : undefined}
+      qr={qr ?? linkQr}
+      qrIsPaymentLink={!qr && !!linkQr}
+      paymentLink={link}
       rows={rampOrderToDetailRows(order)}
     />,
   );
@@ -840,12 +853,40 @@ const PAGE = /* html */ `<!doctype html>
     display: block; width: 100%; padding: 14px; border-radius: 16px; border: none;
     background: #16A34A; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; font: inherit;
   }
-  #confirmBar button:disabled { opacity: .6; cursor: default; }
+  button:disabled { opacity: .65; cursor: default !important; }
+  .btn-spinner {
+    display: inline-block; width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; animation: btnSpin .6s linear infinite;
+  }
+  @keyframes btnSpin { to { transform: rotate(360deg); } }
   #restart {
     display: block; margin: 16px auto 0; background: none; border: none;
     color: var(--muted); font-size: 13px; text-decoration: underline; cursor: pointer; font: inherit;
   }
   #pending-note { text-align: center; color: #B45309; font-size: 12px; margin-top: 8px; }
+
+  /* Toasts (errors / confirmations) */
+  #toast-stack {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 100;
+    display: flex; flex-direction: column; gap: 8px; align-items: stretch;
+    width: 100%; max-width: 360px; padding: 0 16px; pointer-events: none;
+  }
+  .toast {
+    pointer-events: auto; display: flex; align-items: flex-start; gap: 10px;
+    background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-left: 4px solid #DC2626;
+    border-radius: 12px; padding: 12px 14px; box-shadow: 0 8px 24px rgba(0,0,0,.16);
+    font-size: 13px; line-height: 1.4; animation: toastIn .25s cubic-bezier(.16,1,.3,1) both;
+  }
+  .toast.leaving { animation: toastOut .18s ease both; }
+  .toast.success { border-left-color: #16A34A; }
+  .toast-icon { flex-shrink: 0; font-size: 15px; line-height: 1.2; }
+  .toast-msg { flex: 1; word-break: break-word; }
+  .toast-close {
+    flex-shrink: 0; background: none; border: none; color: var(--muted); font-size: 16px;
+    line-height: 1; cursor: pointer; padding: 0; font: inherit;
+  }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(-8px) scale(.96); } to { opacity: 1; transform: none; } }
+  @keyframes toastOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-8px) scale(.96); } }
 
   /* Top-right: language dropdown + theme toggle. */
   #top-right { position: fixed; top: 20px; right: 20px; z-index: 50; display: flex; gap: 8px; align-items: center; }
@@ -898,6 +939,7 @@ const PAGE = /* html */ `<!doctype html>
 </style>
 </head>
 <body>
+<div id="toast-stack" aria-live="polite"></div>
 <div id="top-right">
   <div class="dropdown" id="lang-switch">
     <button class="dropdown-toggle" id="langToggle" onclick="toggleLangMenu()" aria-haspopup="true" aria-label="Language">
@@ -944,6 +986,44 @@ const PAGE = /* html */ `<!doctype html>
     return meta ? meta.currencies : ['ARS', 'BRL', 'MXN'];
   }
 
+  function showToast(message, type) {
+    var stack = document.getElementById('toast-stack');
+    if (!stack || !message) return;
+    var el = document.createElement('div');
+    el.className = 'toast' + (type === 'success' ? ' success' : '');
+    el.setAttribute('role', 'alert');
+    el.innerHTML = '<span class="toast-icon">' + (type === 'success' ? '✓' : '⚠') + '</span><span class="toast-msg"></span><button class="toast-close" aria-label="Dismiss">×</button>';
+    el.querySelector('.toast-msg').textContent = message;
+    var remove = function () {
+      if (!el.parentNode) return;
+      el.classList.add('leaving');
+      setTimeout(function () { el.remove(); }, 180);
+    };
+    el.querySelector('.toast-close').onclick = remove;
+    var timer = setTimeout(remove, 5000);
+    el.addEventListener('mouseenter', function () { clearTimeout(timer); });
+    stack.appendChild(el);
+  }
+
+  // Disables the button and swaps its label for a spinner while a request is in flight
+  // (prevents duplicate submits, gives feedback). Pass overrideLabel to leave it showing
+  // different text once loading ends (e.g. "Check status" after a still-pending poll)
+  // instead of restoring the original label.
+  function setButtonLoading(btn, isLoading, overrideLabel) {
+    if (!btn) return;
+    if (isLoading) {
+      if (btn.dataset.label === undefined) btn.dataset.label = btn.innerHTML;
+      btn.disabled = true;
+      btn.setAttribute('aria-busy', 'true');
+      btn.innerHTML = '<span class="btn-spinner" aria-hidden="true"></span>';
+    } else {
+      btn.disabled = false;
+      btn.removeAttribute('aria-busy');
+      btn.innerHTML = overrideLabel !== undefined ? overrideLabel : btn.dataset.label !== undefined ? btn.dataset.label : btn.innerHTML;
+      delete btn.dataset.label;
+    }
+  }
+
   function swapView(containerId, html) {
     var el = document.getElementById(containerId);
     var current = el.firstElementChild;
@@ -961,14 +1041,18 @@ const PAGE = /* html */ `<!doctype html>
     if (state.currency) qs.set('currency', state.currency);
     if (state.method) qs.set('method', state.method);
     if (state.amount != null) qs.set('amount', String(state.amount));
-    var res = await fetch('/api/step?' + qs.toString());
-    var data = await res.json();
-    PROVIDER_META = {};
-    (data.providers || []).forEach(function (p) { PROVIDER_META[p.name] = p; });
-    if (state.provider && data.providers && !data.providers.some(function (p) { return p.name === state.provider; })) {
-      state.provider = null;
+    try {
+      var res = await fetch('/api/step?' + qs.toString());
+      var data = await res.json();
+      PROVIDER_META = {};
+      (data.providers || []).forEach(function (p) { PROVIDER_META[p.name] = p; });
+      if (state.provider && data.providers && !data.providers.some(function (p) { return p.name === state.provider; })) {
+        state.provider = null;
+      }
+      swapView('view', data.html);
+    } catch (err) {
+      showToast(STR('genericError'), 'error');
     }
-    swapView('view', data.html);
   }
 
   var quoteDebounce = null;
@@ -987,14 +1071,19 @@ const PAGE = /* html */ `<!doctype html>
     var qs = new URLSearchParams({ currency: state.currency || 'ARS', mode: mode });
     if (lastEdited === 'fiat') qs.set('amount', payInput.value || '0');
     else qs.set('cryptoAmount', receiveInput.value || '0');
-    var res = await fetch('/api/quote-preview?' + qs.toString());
-    var data = await res.json();
-    if (data.error || !data.quote) return;
-    if (lastEdited === 'fiat') receiveInput.value = data.quote.cryptoAmount;
-    else payInput.value = data.quote.fiatAmount;
-    state.amount = Number(payInput.value);
-    var note = document.getElementById('rateNote');
-    if (note) note.textContent = STR('rateNote') + ' ' + data.quote.effectiveRate.toFixed(4) + ' ' + (state.currency || 'ARS');
+    try {
+      var res = await fetch('/api/quote-preview?' + qs.toString());
+      var data = await res.json();
+      if (data.error || !data.quote) return;
+      if (lastEdited === 'fiat') receiveInput.value = data.quote.cryptoAmount;
+      else payInput.value = data.quote.fiatAmount;
+      state.amount = Number(payInput.value);
+      var note = document.getElementById('rateNote');
+      if (note) note.textContent = STR('rateNote') + ' ' + data.quote.effectiveRate.toFixed(4) + ' ' + (state.currency || 'ARS');
+    } catch (err) {
+      // Silent — this is a debounced live preview on every keystroke; a stale/failed
+      // tick isn't worth interrupting typing with a toast, the next keystroke retries.
+    }
   }
 
   async function selectStep(field, value) {
@@ -1058,50 +1147,64 @@ const PAGE = /* html */ `<!doctype html>
       state.amount = amountInput ? Number(amountInput.value) : null;
     }
     var btn = document.querySelector('#view button:not(.back)');
-    if (btn) btn.disabled = true;
+    if (btn && btn.disabled) return;
+    setButtonLoading(btn, true);
     var endpoint = op === 'buy' ? 'checkout' : op === 'sell' ? 'sell' : 'quote';
-    var res = await fetch('/api/' + endpoint, {
-      method: 'POST',
-      body: JSON.stringify({ provider: state.provider, currency: state.currency, method: state.method, amount: state.amount, lang: lang, mode: mode }),
-    });
-    var data = await res.json();
-    if (data.error) {
-      if (btn) btn.disabled = false;
-      alert(data.error);
-      return;
-    }
-    uiMode = 'result';
-    orderId = data.orderId || null;
-    swapView('view', data.resultHtml);
-    var confirmLabel = op === 'buy' ? STR('ivePaid') : op === 'sell' ? STR('iveSent') : null;
-    if (confirmLabel) {
-      var confirmFn = op === 'sell' ? 'confirmSell()' : 'confirmBuy()';
-      swapView('actions', '<div id="confirmBar"><button onclick="' + confirmFn + '">' + confirmLabel + '</button></div><button id="restart" onclick="location.reload()">' + STR('startOver') + '</button>');
-    } else {
-      swapView('actions', '<button id="restart" onclick="location.reload()">' + STR('startOver') + '</button>');
+    try {
+      var res = await fetch('/api/' + endpoint, {
+        method: 'POST',
+        body: JSON.stringify({ provider: state.provider, currency: state.currency, method: state.method, amount: state.amount, lang: lang, mode: mode }),
+      });
+      var data = await res.json();
+      if (data.error) {
+        setButtonLoading(btn, false);
+        showToast(data.error, 'error');
+        return;
+      }
+      uiMode = 'result';
+      orderId = data.orderId || null;
+      swapView('view', data.resultHtml);
+      var confirmLabel = op === 'buy' ? STR('ivePaid') : op === 'sell' ? STR('iveSent') : null;
+      if (confirmLabel) {
+        var confirmFn = op === 'sell' ? 'confirmSell()' : 'confirmBuy()';
+        swapView('actions', '<div id="confirmBar"><button onclick="' + confirmFn + '">' + confirmLabel + '</button></div><button id="restart" onclick="location.reload()">' + STR('startOver') + '</button>');
+      } else {
+        swapView('actions', '<button id="restart" onclick="location.reload()">' + STR('startOver') + '</button>');
+      }
+    } catch (err) {
+      setButtonLoading(btn, false);
+      showToast(STR('genericError'), 'error');
     }
   }
 
   async function pollConfirm(endpoint) {
     var btn = document.querySelector('#confirmBar button');
-    btn.disabled = true;
-    btn.textContent = '…';
-    var res = await fetch('/api/' + endpoint, { method: 'POST', body: JSON.stringify({ orderId: orderId, lang: lang, mode: mode }) });
-    var data = await res.json();
-    var note = document.getElementById('pending-note');
-    if (note) note.remove();
-    if (data.error) { btn.disabled = false; alert(data.error); return; }
-    if (data.pending) {
-      btn.disabled = false;
-      btn.textContent = STR('checkStatus');
-      var p = document.createElement('p');
-      p.id = 'pending-note';
-      p.textContent = STR('stillPending');
-      document.getElementById('actions').appendChild(p);
-      return;
+    if (btn && btn.disabled) return;
+    setButtonLoading(btn, true);
+    try {
+      var res = await fetch('/api/' + endpoint, { method: 'POST', body: JSON.stringify({ orderId: orderId, lang: lang, mode: mode }) });
+      var data = await res.json();
+      var note = document.getElementById('pending-note');
+      if (note) note.remove();
+      if (data.error) {
+        setButtonLoading(btn, false);
+        showToast(data.error, 'error');
+        return;
+      }
+      if (data.pending) {
+        setButtonLoading(btn, false, STR('checkStatus'));
+        var p = document.createElement('p');
+        p.id = 'pending-note';
+        p.textContent = STR('stillPending');
+        document.getElementById('actions').appendChild(p);
+        return;
+      }
+      swapView('view', data.resultHtml);
+      swapView('actions', '<button id="restart" onclick="location.reload()">' + STR('startOver') + '</button>');
+    } catch (err) {
+      setButtonLoading(btn, false);
+      showToast(STR('genericError'), 'error');
     }
-    swapView('view', data.resultHtml);
-    swapView('actions', '<button id="restart" onclick="location.reload()">' + STR('startOver') + '</button>');
   }
   function confirmBuy() { pollConfirm('confirm'); }
   function confirmSell() { pollConfirm('sellConfirm'); }

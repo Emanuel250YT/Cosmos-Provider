@@ -99,6 +99,7 @@ const en = {
 
   // ReceivePayment
   scanToPay: "Scan to pay",
+  continueFromPhone: "Continue from your phone",
   openPaymentLink: "Open payment link",
   copyCode: "Copy code",
 };
@@ -183,6 +184,7 @@ const es: Record<keyof typeof en, string> = {
   sendSuccessMessage: "Tu pago se envió correctamente y la transacción ya está completa.",
 
   scanToPay: "Escaneá para pagar",
+  continueFromPhone: "Continuá desde tu teléfono",
   openPaymentLink: "Abrir link de pago",
   copyCode: "Copiar código",
 };
@@ -267,6 +269,7 @@ const pt: Record<keyof typeof en, string> = {
   sendSuccessMessage: "Seu pagamento foi enviado com sucesso e a transação já está completa.",
 
   scanToPay: "Escaneie para pagar",
+  continueFromPhone: "Continue pelo seu celular",
   openPaymentLink: "Abrir link de pagamento",
   copyCode: "Copiar código",
 };

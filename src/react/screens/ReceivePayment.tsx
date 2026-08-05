@@ -8,9 +8,18 @@ export interface ReceivePaymentProps {
   amount: string;
   statusLabel: string;
   statusColor?: string;
-  /** QR to scan — pass `src` (server-rendered) or `value` (client-rendered). Omit when there's nothing scannable (e.g. a link-only charge). */
+  /** QR to scan — pass `src` (server-rendered) or `value` (client-rendered). Omit when there's nothing scannable (e.g. a link-only charge) and let `paymentLink` drive an auto-generated QR instead. */
   qr?: Pick<QRCodeProps, "src" | "value">;
-  /** Shown instead of (or in addition to) the QR for hosted-checkout charges. */
+  /**
+   * Marks `qr` as encoding `paymentLink` itself rather than a direct-pay
+   * code (PIX and the like) — swaps the default title to "Continue from
+   * your phone". Only needed when you pre-render the link's QR yourself
+   * (server-side, passing `qr.src`); when `qr` is omitted and `paymentLink`
+   * is set, this is inferred automatically and the QR renders client-side
+   * from `paymentLink`.
+   */
+  qrIsPaymentLink?: boolean;
+  /** Shown instead of (or alongside) the QR for hosted-checkout charges. */
   paymentLink?: string;
   paymentLinkLabel?: string;
   /** Extra detail rows below the QR — order id, expiry, method... */
@@ -20,24 +29,30 @@ export interface ReceivePaymentProps {
   locale?: Locale;
 }
 
-/** "Scan to pay" screen: QR (or payment link), amount, live status, and order details. */
+/** "Scan to pay" screen: a real payment QR (e.g. PIX) or, for link-based checkouts, a QR of the link itself so the buyer can continue from their phone. Amount, live status, and order details round it out. */
 export function ReceivePayment({
   locale = "en",
-  title = t(locale, "scanToPay"),
+  title,
   amount,
   statusLabel,
   statusColor = "#9CA3AF",
   qr,
+  qrIsPaymentLink = false,
   paymentLink,
   paymentLinkLabel = t(locale, "openPaymentLink"),
   rows,
   onCopyCode,
   copyLabel = t(locale, "copyCode"),
 }: ReceivePaymentProps) {
+  const autoLinkQr = !qr && paymentLink ? { value: paymentLink } : undefined;
+  const effectiveQr = qr ?? autoLinkQr;
+  const isLinkQr = qrIsPaymentLink || (!qr && !!autoLinkQr);
+  const resolvedTitle = title ?? (isLinkQr ? t(locale, "continueFromPhone") : t(locale, "scanToPay"));
+
   return (
     <div style={{ ...screenCardStyle, fontFamily: "Helvetica, Arial, sans-serif", background: "#fff", borderRadius: 24, padding: 20, color: "#111827" }}>
       <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>{title}</div>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>{resolvedTitle}</div>
         <div style={{ fontSize: 32, fontWeight: 800, marginTop: 8 }}>{amount}</div>
         <div
           style={{
@@ -58,10 +73,10 @@ export function ReceivePayment({
         </div>
       </div>
 
-      {qr ? (
+      {effectiveQr ? (
         <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>
           <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, padding: 16 }}>
-            <QRCode {...qr} size={220} />
+            <QRCode {...effectiveQr} size={220} />
           </div>
         </div>
       ) : null}
