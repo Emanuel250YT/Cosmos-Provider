@@ -6,7 +6,8 @@ import { t, type Locale } from "../i18n";
 export interface ReceivePaymentProps {
   title?: string;
   amount: string;
-  statusLabel: string;
+  /** Live status pill (e.g. "Waiting for payment") shown under the amount. Omit to skip it entirely. */
+  statusLabel?: string;
   statusColor?: string;
   /** QR to scan — pass `src` (server-rendered) or `value` (client-rendered). Omit when there's nothing scannable (e.g. a link-only charge) and let `paymentLink` drive an auto-generated QR instead. */
   qr?: Pick<QRCodeProps, "src" | "value">;
@@ -54,23 +55,25 @@ export function ReceivePayment({
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 18, fontWeight: 700 }}>{resolvedTitle}</div>
         <div style={{ fontSize: 32, fontWeight: 800, marginTop: 8 }}>{amount}</div>
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            marginTop: 8,
-            padding: "4px 10px",
-            borderRadius: 999,
-            background: `${statusColor}1A`,
-            color: statusColor,
-            fontSize: 12,
-            fontWeight: 700,
-          }}
-        >
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor }} />
-          {statusLabel}
-        </div>
+        {statusLabel ? (
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              marginTop: 8,
+              padding: "4px 10px",
+              borderRadius: 999,
+              background: `${statusColor}1A`,
+              color: statusColor,
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor }} />
+            {statusLabel}
+          </div>
+        ) : null}
       </div>
 
       {effectiveQr ? (

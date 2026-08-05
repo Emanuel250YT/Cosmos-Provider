@@ -17,32 +17,32 @@
  * `logoUrl` — reusing `ramp.providers` for the picker means adding a fourth
  * is the only change needed anywhere.
  *
- * The UI always runs against the Mercado Pago simulator
- * (`examples/helpers/mock-mercadopago`) — safe, deterministic, no external
- * calls. There is deliberately no runtime Simulated/Live switch in the UI:
- * which credentials a provider talks to (sandbox vs. production) is a
- * property of how that provider was constructed (`.env`), not something a
- * user should be able to flip live. The server-side `mode: "live"` code path
- * still exists below for anyone hitting `/api/*` directly with real `.env`
- * credentials — see the actions for details — but nothing in the page wires
- * it up.
- * Because a local dev server can't receive real inbound webhooks, "confirm"
- * in Live mode polls the provider's real charge status instead of
- * simulating a webhook — it only completes once someone has genuinely paid.
+ * Which credentials a provider talks to (sandbox vs. production) is a
+ * property of how that provider was constructed (`.env`), not a runtime
+ * toggle: each Mercado Pago account (BR, AR) uses its real `MP_*_ACCESS_TOKEN`
+ * whenever `.env` sets one — sandbox or production, whatever's actually
+ * configured there — and only falls back to the local, in-memory simulator
+ * (`examples/helpers/mock-mercadopago`, safe/deterministic/no external calls)
+ * when that env var is absent. Etherfuse always talks to its real sandbox API
+ * (no mock exists for it) regardless. `mockBackedProviders` tracks which
+ * provider names are on the local simulator, so `confirmOrder` knows whether
+ * it's safe to fake a payment (mock) or must genuinely check status (real).
  *
  * Once an order is created, the page polls `/api/status` (a pure read —
  * no side effects) every 5s waiting for it to land as `completed`, same as
  * a real integration waiting on its webhook handler to update the order
  * store. That's "Real" confirmation mode (the default, no button — just a
  * wait). The FAB's "Test" confirmation mode additionally surfaces a manual
- * "mark as paid" control that calls the existing forced-confirm actions
- * (`/api/confirm`, `/api/sellConfirm` — the mock-webhook/sandbox-deposit
- * simulation), so you can jump straight to the next stage instead of
- * waiting on a webhook this local demo has no way to receive on its own.
- * This is unrelated to the Simulated/Live provider-credentials axis above —
- * it only controls how THIS page decides an already-created order is done.
+ * control that calls `/api/confirm`/`/api/sellConfirm`: for a mock-backed
+ * provider that instantly fakes the webhook/deposit; for a real Mercado
+ * Pago account (no sandbox "simulate payment" endpoint exists) it instead
+ * polls the real charge status right now instead of waiting for the next
+ * tick — never fabricated, so it only completes once someone has genuinely
+ * paid. Because `MP_BR_ACCESS_TOKEN` can be a real production token, picking
+ * Mercado Pago Brasil in this demo can create a genuine, chargeable
+ * preference — know what you're testing against.
  *
- * Two things are deliberately real even in Simulated mode — see
+ * Two things are deliberately real regardless of mock/live — see
  * examples/mercadopago/settlement-demo.ts for the full rationale:
  * - The rate: `CoinGeckoOracle`, no fixed/mocked number.
  * - The release: a REAL Stellar testnet transaction for a proper asset,
@@ -80,7 +80,6 @@ type Op = "buy" | "sell" | "quote";
 type Method = "qr" | "link";
 type Currency = "ARS" | "BRL" | "MXN";
 type Lang = "en" | "es" | "pt";
-type Mode = "simulated" | "live";
 interface WizardState {
   provider: string | null;
   currency: Currency | null;
@@ -126,7 +125,6 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     checkStatus: "Check status",
     stillPending: "Still pending — try again in a moment.",
     genericError: "Something went wrong. Please try again.",
-    waitingPayment: "Waiting for payment",
     waitingCrypto: "Waiting for your USDC",
     step: "Step",
     of: "of",
@@ -164,7 +162,6 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     checkStatus: "Verificar estado",
     stillPending: "Todavía pendiente — probá de nuevo en un momento.",
     genericError: "Algo salió mal. Probá de nuevo.",
-    waitingPayment: "Esperando el pago",
     waitingCrypto: "Esperando tu USDC",
     step: "Paso",
     of: "de",
@@ -202,7 +199,6 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     checkStatus: "Verificar status",
     stillPending: "Ainda pendente — tente novamente em instantes.",
     genericError: "Algo deu errado. Tente novamente.",
-    waitingPayment: "Aguardando pagamento",
     waitingCrypto: "Aguardando seu USDC",
     step: "Etapa",
     of: "de",
@@ -341,78 +337,60 @@ const etherfuseProvider = new EtherfuseProvider({
 
 const oracle = () => new CoinGeckoOracle({ apiKey: process.env.COINGECKO_API_KEY });
 
-const rampSimulated = new CosmosRamp({
-  providers: [
-    etherfuseProvider,
-    new MercadoPagoProvider({
-      name: "mercadopago-br",
-      regions: ["BR"],
-      currencies: [FiatCurrency.BRL],
-      accessToken: "TEST-demo-br",
-      webhookSecret: WEBHOOK_SECRET,
+/** Provider names backed by the local simulator (no real `MP_*_ACCESS_TOKEN` configured) — safe to fake a payment for; anything else needs a genuine status check. */
+const mockBackedProviders = new Set<string>();
+
+/** A Mercado Pago account: real credentials from `.env` when set, else the local simulator (fake payments allowed — tracked in `mockBackedProviders`). */
+function buildMercadoPago(name: string, region: string, currency: FiatCurrency, envToken: string | undefined, envWebhookSecret: string | undefined): MercadoPagoProvider {
+  if (envToken) {
+    return new MercadoPagoProvider({
+      name,
+      regions: [region],
+      currencies: [currency],
+      accessToken: envToken,
+      webhookSecret: envWebhookSecret,
       defaultPayerEmail: "buyer@example.com",
-      fetch: mp.fetchImpl,
       logoUrl: "/assets/logo/mp.svg",
-    }),
-    new MercadoPagoProvider({
-      name: "mercadopago-ar",
-      regions: ["AR"],
-      currencies: [FiatCurrency.ARS],
-      accessToken: "TEST-demo-ar",
-      webhookSecret: WEBHOOK_SECRET,
-      defaultPayerEmail: "buyer@example.com",
-      fetch: mp.fetchImpl,
-      logoUrl: "/assets/logo/mp.svg",
-    }),
-  ],
+    });
+  }
+  mockBackedProviders.add(name);
+  return new MercadoPagoProvider({
+    name,
+    regions: [region],
+    currencies: [currency],
+    accessToken: `TEST-demo-${name}`,
+    webhookSecret: WEBHOOK_SECRET,
+    defaultPayerEmail: "buyer@example.com",
+    fetch: mp.fetchImpl,
+    logoUrl: "/assets/logo/mp.svg",
+  });
+}
+
+const mercadoPagoBr = buildMercadoPago("mercadopago-br", "BR", FiatCurrency.BRL, process.env.MP_BR_ACCESS_TOKEN, process.env.MP_BR_WEBHOOK_SECRET);
+const mercadoPagoAr = buildMercadoPago("mercadopago-ar", "AR", FiatCurrency.ARS, process.env.MP_AR_ACCESS_TOKEN, process.env.MP_AR_WEBHOOK_SECRET);
+
+const ramp = new CosmosRamp({
+  providers: [etherfuseProvider, mercadoPagoBr, mercadoPagoAr],
   oracle: oracle(),
   settlement: settlementFn,
 });
 
-const liveProviders: PaymentProvider[] = [etherfuseProvider];
-if (process.env.MP_BR_ACCESS_TOKEN) {
-  liveProviders.push(
-    new MercadoPagoProvider({
-      name: "mercadopago-br",
-      regions: ["BR"],
-      currencies: [FiatCurrency.BRL],
-      accessToken: process.env.MP_BR_ACCESS_TOKEN,
-      webhookSecret: process.env.MP_BR_WEBHOOK_SECRET,
-      defaultPayerEmail: "buyer@example.com",
-      logoUrl: "/assets/logo/mp.svg",
-    }),
-  );
-}
-if (process.env.MP_AR_ACCESS_TOKEN) {
-  liveProviders.push(
-    new MercadoPagoProvider({
-      name: "mercadopago-ar",
-      regions: ["AR"],
-      currencies: [FiatCurrency.ARS],
-      accessToken: process.env.MP_AR_ACCESS_TOKEN,
-      webhookSecret: process.env.MP_AR_WEBHOOK_SECRET,
-      defaultPayerEmail: "buyer@example.com",
-      logoUrl: "/assets/logo/mp.svg",
-    }),
-  );
-}
-const rampLive = new CosmosRamp({ providers: liveProviders, oracle: oracle(), settlement: settlementFn });
-
-function rampFor(mode: Mode): CosmosRamp {
-  return mode === "live" ? rampLive : rampSimulated;
+/** `true` if `providerName` is on the local simulator (safe to fake a payment for) rather than a real, credentialed account. */
+function isMockBacked(providerName: string): boolean {
+  return mockBackedProviders.has(providerName);
 }
 
-console.log(`Simulated providers: ${rampSimulated.providers.map((p) => p.name).join(", ")}`);
-console.log(`Live providers: ${rampLive.providers.map((p) => p.name).join(", ")}${process.env.MP_BR_ACCESS_TOKEN ? " — mercadopago-br is LIVE (real API)" : ""}`);
+console.log(
+  `Providers: ${ramp.providers.map((p) => (isMockBacked(p.name) ? p.name : `${p.name} (REAL)`)).join(", ")}`,
+);
 
 // ---------------------------------------------------------------------------
 // Wizard steps — provider → currency → [method] → amount.
 // ---------------------------------------------------------------------------
 
-function providersFor(op: Op, mode: Mode): readonly PaymentProvider[] {
-  const all = rampFor(mode).providers;
+function providersFor(op: Op): readonly PaymentProvider[] {
   // Etherfuse doesn't support payouts in this adapter — leave it out of "sell".
-  return op === "sell" ? all.filter((p) => !p.name.startsWith("etherfuse")) : all;
+  return op === "sell" ? ramp.providers.filter((p) => !p.name.startsWith("etherfuse")) : ramp.providers;
 }
 
 function wizardShell(op: Op, lang: Lang, stepName: string, bodyHtml: string): string {
@@ -423,7 +401,7 @@ function wizardShell(op: Op, lang: Lang, stepName: string, bodyHtml: string): st
   const opTitleKey = op === "buy" ? "opBuy" : op === "sell" ? "opSell" : "opQuote";
   const subtitleKey = op === "buy" ? "subtitleBuy" : op === "sell" ? "subtitleSell" : "subtitleQuote";
   const stepLabelKey = stepName === "provider" ? "stepProvider" : stepName === "currency" ? "stepCurrency" : stepName === "method" ? "stepMethod" : "stepAmount";
-  return `<div style="width:100%;max-width:420px;box-sizing:border-box;margin:0 auto;background:var(--panel);border-radius:24px;padding:24px;font-family:Helvetica, Arial, sans-serif;color:var(--fg)">
+  return `<div style="width:100%;max-width:480px;box-sizing:border-box;margin:0 auto;background:var(--panel);border-radius:24px;padding:24px;font-family:Helvetica, Arial, sans-serif;color:var(--fg)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
       ${backBtn}
       <span style="font-size:11px;color:var(--muted)">${t(lang, "step")} ${idx + 1} ${t(lang, "of")} ${steps.length}</span>
@@ -436,8 +414,8 @@ function wizardShell(op: Op, lang: Lang, stepName: string, bodyHtml: string): st
   </div>`;
 }
 
-function renderProviderBody(op: Op, mode: Mode, state: WizardState): string {
-  const rows = providersFor(op, mode)
+function renderProviderBody(op: Op, state: WizardState): string {
+  const rows = providersFor(op)
     .map((p) => {
       const card = renderToStaticMarkup(
         <PaymentMethodCard
@@ -456,8 +434,8 @@ function renderProviderBody(op: Op, mode: Mode, state: WizardState): string {
   return `<div style="display:flex;flex-direction:column;gap:8px">${rows}</div>`;
 }
 
-function renderCurrencyBody(op: Op, mode: Mode, state: WizardState, lang: Lang): string {
-  const provider = providersFor(op, mode).find((p) => p.name === state.provider);
+function renderCurrencyBody(op: Op, state: WizardState, lang: Lang): string {
+  const provider = providersFor(op).find((p) => p.name === state.provider);
   const currencies = (provider?.currencies.length ? (provider.currencies as Currency[]) : (["ARS", "BRL"] as const)) as readonly Currency[];
   const rows = currencies
     .map((c) => {
@@ -506,8 +484,7 @@ function renderQuoteAmountBody(state: WizardState, lang: Lang): string {
 }
 
 /** Live, two-way pay/receive quote: editing either field re-quotes the other via /api/quote-preview. */
-async function renderBuyAmountBody(mode: Mode, state: WizardState, lang: Lang): Promise<string> {
-  const ramp = rampFor(mode);
+async function renderBuyAmountBody(state: WizardState, lang: Lang): Promise<string> {
   const currency = state.currency ?? "ARS";
   const fiatDefault = state.amount ?? DEFAULT_FIAT_AMOUNT[currency];
   let quote: QuoteBreakdown | null = null;
@@ -527,19 +504,19 @@ async function renderBuyAmountBody(mode: Mode, state: WizardState, lang: Lang): 
     <button onclick="submitStep()" style="${BUTTON_STYLE}">${t(lang, "continueLabel")}</button>`;
 }
 
-async function renderStep(op: Op, stepName: string, state: WizardState, lang: Lang, mode: Mode): Promise<string> {
+async function renderStep(op: Op, stepName: string, state: WizardState, lang: Lang): Promise<string> {
   const body =
     stepName === "provider"
-      ? renderProviderBody(op, mode, state)
+      ? renderProviderBody(op, state)
       : stepName === "currency"
-        ? renderCurrencyBody(op, mode, state, lang)
+        ? renderCurrencyBody(op, state, lang)
         : stepName === "method"
           ? renderMethodBody(state, lang)
           : op === "sell"
             ? renderSellAmountBody(state, lang)
             : op === "quote"
               ? renderQuoteAmountBody(state, lang)
-              : await renderBuyAmountBody(mode, state, lang);
+              : await renderBuyAmountBody(state, lang);
   return wizardShell(op, lang, stepName, body);
 }
 
@@ -562,8 +539,6 @@ async function renderPending(order: RampOrderData, lang: Lang): Promise<string> 
     <ReceivePayment
       locale={lang}
       amount={`${order.quote.fiatAmount.toFixed(2)} ${order.quote.currency}`}
-      statusLabel={t(lang, "waitingPayment")}
-      statusColor="#9CA3AF"
       qr={qr ?? linkQr}
       qrIsPaymentLink={!qr && !!linkQr}
       paymentLink={link}
@@ -578,8 +553,6 @@ function renderSellPending(order: RampOrderData, lang: Lang): string {
     <ReceivePayment
       title={t(lang, "waitingCrypto")}
       amount={`${order.quote.cryptoAmount} ${order.quote.asset}`}
-      statusLabel={t(lang, "waitingCrypto")}
-      statusColor="#9CA3AF"
       rows={rampOrderToDetailRows(order)}
     />,
   );
@@ -599,7 +572,7 @@ function renderReceipt(order: RampOrderData): string {
 /** A quote-only summary — no order is created. */
 function renderQuoteResult(quote: QuoteBreakdown): string {
   return renderToStaticMarkup(
-    <div style={{ width: "100%", maxWidth: 420, boxSizing: "border-box", margin: "0 auto", background: "var(--panel, #fff)", borderRadius: 16, padding: 20, fontFamily: "Helvetica, Arial, sans-serif", color: "var(--fg, #111827)" }}>
+    <div style={{ width: "100%", maxWidth: 480, boxSizing: "border-box", margin: "0 auto", background: "var(--panel, #fff)", borderRadius: 16, padding: 20, fontFamily: "Helvetica, Arial, sans-serif", color: "var(--fg, #111827)" }}>
       <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
         {quote.asset} · {quote.currency}
       </div>
@@ -612,11 +585,11 @@ function renderQuoteResult(quote: QuoteBreakdown): string {
 
 // ---------------------------------------------------------------------------
 // Finalize an order: run the shared settlement function directly (used for
-// Live/Etherfuse confirmations, which never go through ramp.handleWebhook —
+// real/Etherfuse confirmations, which never go through ramp.handleWebhook —
 // see confirmOrder).
 // ---------------------------------------------------------------------------
 
-async function finalizeOrder(ramp: CosmosRamp, order: RampOrderData): Promise<RampOrderData> {
+async function finalizeOrder(order: RampOrderData): Promise<RampOrderData> {
   await ramp.store.update(order.id, { status: "paid" });
   const settling = (await ramp.store.update(order.id, { status: "settling" }))!;
   const result = await settlementFn({ order: settling, asset: settling.quote.asset, amount: settling.quote.cryptoAmount, wallet: settling.wallet });
@@ -628,27 +601,27 @@ async function finalizeOrder(ramp: CosmosRamp, order: RampOrderData): Promise<Ra
  * - Etherfuse: triggers the REAL sandbox deposit simulation
  *   (`client.sandbox.fiatReceived`), then finalizes directly — Etherfuse has
  *   no local webhook to receive, sandbox or not.
- * - Live Mercado Pago: polls the REAL charge status — no webhook is
- *   fabricated, so this only completes once someone has genuinely paid.
- * - Simulated Mercado Pago: the existing mock webhook flow.
+ * - Real Mercado Pago account: polls the REAL charge status — Mercado Pago
+ *   has no sandbox "simulate payment" endpoint, so nothing is fabricated;
+ *   this only completes once someone has genuinely paid.
+ * - Mock-backed Mercado Pago: the local simulator's mock webhook flow.
  */
-async function confirmOrder(mode: Mode, orderId: string): Promise<{ resultHtml?: string; pending?: boolean }> {
-  const ramp = rampFor(mode);
+async function confirmOrder(orderId: string): Promise<{ resultHtml?: string; pending?: boolean }> {
   const order = await ramp.getOrder(orderId);
   if (!order?.charge) throw new Error("Order not found or has no charge.");
 
   if (order.provider.startsWith("etherfuse")) {
     await etherfuseProvider.client.sandbox.fiatReceived(order.charge.id);
-    const updated = await finalizeOrder(ramp, order);
+    const updated = await finalizeOrder(order);
     return { resultHtml: renderReceipt(updated) };
   }
 
-  if (mode === "live") {
+  if (!isMockBacked(order.provider)) {
     const provider = ramp.providers.find((p) => p.name === order.provider);
-    if (!provider) throw new Error(`Provider ${order.provider} is not registered in live mode.`);
+    if (!provider) throw new Error(`Provider ${order.provider} is not registered.`);
     const state = await provider.getCharge(order.charge.id);
     if (state.status !== "approved") return { pending: true };
-    const updated = await finalizeOrder(ramp, order);
+    const updated = await finalizeOrder(order);
     return { resultHtml: renderReceipt(updated) };
   }
 
@@ -667,8 +640,6 @@ type Action = (body: any) => Promise<unknown>;
 const actions: Record<string, Action> = {
   /** Creates the onramp charge for the chosen provider/currency/method/amount and returns the pending-payment view. */
   async checkout(body) {
-    const mode: Mode = body.mode === "live" ? "live" : "simulated";
-    const ramp = rampFor(mode);
     const providerName = ramp.providers.some((p) => p.name === body.provider) ? body.provider : ramp.providers[0]!.name;
     const currency = parseCurrency(body.currency);
     const method: Method = currency === "BRL" && body.method === "qr" ? "qr" : "link";
@@ -689,8 +660,7 @@ const actions: Record<string, Action> = {
   },
 
   async confirm(body) {
-    const mode: Mode = body.mode === "live" ? "live" : "simulated";
-    return confirmOrder(mode, body.orderId);
+    return confirmOrder(body.orderId);
   },
 
   /**
@@ -701,8 +671,7 @@ const actions: Record<string, Action> = {
    * the order store; polling this is how the page notices without one.
    */
   async status(body) {
-    const mode: Mode = body.mode === "live" ? "live" : "simulated";
-    const order = await rampFor(mode).getOrder(body.orderId);
+    const order = await ramp.getOrder(body.orderId);
     if (!order) throw new Error("Order not found.");
     if (order.status === "completed") return { done: true, resultHtml: renderReceipt(order) };
     if (order.status === "failed" || order.status === "expired" || order.status === "canceled") {
@@ -713,9 +682,7 @@ const actions: Record<string, Action> = {
 
   /** Creates an offramp order (crypto → fiat) and returns the "waiting for your USDC" view. */
   async sell(body) {
-    const mode: Mode = body.mode === "live" ? "live" : "simulated";
-    const ramp = rampFor(mode);
-    const providerName = providersFor("sell", mode).some((p) => p.name === body.provider) ? body.provider : providersFor("sell", mode)[0]!.name;
+    const providerName = providersFor("sell").some((p) => p.name === body.provider) ? body.provider : providersFor("sell")[0]!.name;
     const currency = parseCurrency(body.currency);
     const requested = Number(body.amount);
     const cryptoAmount = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_CRYPTO_AMOUNT;
@@ -733,16 +700,12 @@ const actions: Record<string, Action> = {
 
   /** Simulates the seller's crypto arriving → triggers the fiat payout → returns the receipt view. */
   async sellConfirm(body) {
-    const mode: Mode = body.mode === "live" ? "live" : "simulated";
-    const ramp = rampFor(mode);
     const order = await ramp.confirmCryptoReceived(body.orderId, { txId: "0xincoming-demo" });
     return { resultHtml: renderReceipt(order) };
   },
 
   /** Pure quote — no order created. Pricing is oracle-based, not provider-specific; `provider` is accepted for UI consistency. */
   async quote(body) {
-    const mode: Mode = body.mode === "live" ? "live" : "simulated";
-    const ramp = rampFor(mode);
     const currency = parseCurrency(body.currency);
     const requested = Number(body.amount);
     const amount = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_FIAT_AMOUNT[currency];
@@ -793,7 +756,6 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
   }
   if (req.method === "GET" && url.pathname === "/api/step") {
     const op: Op = url.searchParams.get("op") === "sell" ? "sell" : url.searchParams.get("op") === "quote" ? "quote" : "buy";
-    const mode: Mode = url.searchParams.get("mode") === "live" ? "live" : "simulated";
     const stepName = url.searchParams.get("step") || "provider";
     const lang: Lang = STRINGS[url.searchParams.get("lang") as Lang] ? (url.searchParams.get("lang") as Lang) : "en";
     const amountParam = url.searchParams.get("amount");
@@ -804,19 +766,18 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       method: url.searchParams.get("method") === "qr" ? "qr" : url.searchParams.get("method") === "link" ? "link" : null,
       amount: amountParam ? Number(amountParam) : null,
     };
-    const providers = providersFor(op, mode).map((p) => ({ name: p.name, currencies: p.currencies }));
-    const html = await renderStep(op, stepName, state, lang, mode);
+    const providers = providersFor(op).map((p) => ({ name: p.name, currencies: p.currencies }));
+    const html = await renderStep(op, stepName, state, lang);
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ html, providers }));
     return;
   }
   /** Live re-quote for the buy amount step: pass either `amount` (fiat) or `cryptoAmount`, get the other back. Provider-agnostic — pricing is oracle-based. */
   if (req.method === "GET" && url.pathname === "/api/quote-preview") {
-    const mode: Mode = url.searchParams.get("mode") === "live" ? "live" : "simulated";
     const currency = parseCurrency(url.searchParams.get("currency"));
     const amountParam = url.searchParams.get("amount");
     const cryptoParam = url.searchParams.get("cryptoAmount");
     try {
-      const quote = await rampFor(mode).quote({
+      const quote = await ramp.quote({
         direction: "onramp",
         currency: toFiatCurrency(currency),
         amount: amountParam ? Number(amountParam) : undefined,
@@ -860,7 +821,7 @@ server.listen(PORT, () => {
 // cosmos-providers/react components, server-rendered per request above)
 // ---------------------------------------------------------------------------
 
-const INITIAL_PROVIDERS = JSON.stringify(providersFor("buy", "simulated").map((p) => ({ name: p.name, currencies: p.currencies })));
+const INITIAL_PROVIDERS = JSON.stringify(providersFor("buy").map((p) => ({ name: p.name, currencies: p.currencies })));
 
 const PAGE = /* html */ `<!doctype html>
 <html lang="en">
@@ -899,7 +860,7 @@ const PAGE = /* html */ `<!doctype html>
     min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
     transition: background .2s ease, color .2s ease;
   }
-  main { width: 100%; max-width: 420px; }
+  main { width: 100%; max-width: 480px; }
   .pickable { cursor: pointer; }
   .pickable:hover { filter: brightness(0.98); }
   .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); }
@@ -1009,7 +970,7 @@ const PAGE = /* html */ `<!doctype html>
   <button id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path></svg></button>
 </div>
 <main>
-  <div id="view">${await renderStep("buy", "provider", { provider: null, currency: null, method: null, amount: null }, "en", "simulated")}</div>
+  <div id="view">${await renderStep("buy", "provider", { provider: null, currency: null, method: null, amount: null }, "en")}</div>
   <div id="actions"></div>
 </main>
 <div id="fab-wrap">
@@ -1020,7 +981,6 @@ const PAGE = /* html */ `<!doctype html>
   var STEPS = ${JSON.stringify(STEPS)};
   var STR_DICT = ${JSON.stringify(STRINGS)};
   var lang = 'en';
-  var mode = 'simulated'; // fixed — which network/credentials a provider talks to is decided at provider construction, not toggled here
   var op = 'buy';
   var uiMode = 'wizard';
   var stepIdx = 0;
@@ -1098,7 +1058,7 @@ const PAGE = /* html */ `<!doctype html>
   async function checkStatus() {
     if (!orderId) { stopPolling(); return; }
     try {
-      var res = await fetch('/api/status', { method: 'POST', body: JSON.stringify({ orderId: orderId, mode: mode }) });
+      var res = await fetch('/api/status', { method: 'POST', body: JSON.stringify({ orderId: orderId }) });
       var data = await res.json();
       if (data.error || !data.done) return;
       stopPolling();
@@ -1145,7 +1105,7 @@ const PAGE = /* html */ `<!doctype html>
 
   async function fetchStep() {
     var stepName = STEPS[op][stepIdx];
-    var qs = new URLSearchParams({ op: op, step: stepName, lang: lang, mode: mode, provider: state.provider || '' });
+    var qs = new URLSearchParams({ op: op, step: stepName, lang: lang, provider: state.provider || '' });
     if (state.currency) qs.set('currency', state.currency);
     if (state.method) qs.set('method', state.method);
     if (state.amount != null) qs.set('amount', String(state.amount));
@@ -1176,7 +1136,7 @@ const PAGE = /* html */ `<!doctype html>
     var payInput = document.getElementById('payAmount');
     var receiveInput = document.getElementById('receiveAmount');
     if (!payInput || !receiveInput) return;
-    var qs = new URLSearchParams({ currency: state.currency || 'ARS', mode: mode });
+    var qs = new URLSearchParams({ currency: state.currency || 'ARS' });
     if (lastEdited === 'fiat') qs.set('amount', payInput.value || '0');
     else qs.set('cryptoAmount', receiveInput.value || '0');
     try {
@@ -1261,7 +1221,7 @@ const PAGE = /* html */ `<!doctype html>
     try {
       var res = await fetch('/api/' + endpoint, {
         method: 'POST',
-        body: JSON.stringify({ provider: state.provider, currency: state.currency, method: state.method, amount: state.amount, lang: lang, mode: mode }),
+        body: JSON.stringify({ provider: state.provider, currency: state.currency, method: state.method, amount: state.amount, lang: lang }),
       });
       var data = await res.json();
       if (data.error) {
@@ -1287,7 +1247,7 @@ const PAGE = /* html */ `<!doctype html>
     if (btn && btn.disabled) return;
     setButtonLoading(btn, true);
     try {
-      var res = await fetch('/api/' + endpoint, { method: 'POST', body: JSON.stringify({ orderId: orderId, lang: lang, mode: mode }) });
+      var res = await fetch('/api/' + endpoint, { method: 'POST', body: JSON.stringify({ orderId: orderId, lang: lang }) });
       var data = await res.json();
       var note = document.getElementById('pending-note');
       if (note) note.remove();

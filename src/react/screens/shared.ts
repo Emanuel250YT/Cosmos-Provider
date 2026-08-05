@@ -7,7 +7,7 @@ import type { CSSProperties } from "react";
  */
 export const screenCardStyle: CSSProperties = {
   width: "100%",
-  maxWidth: 420,
+  maxWidth: 480,
   boxSizing: "border-box",
   margin: "0 auto",
 };
