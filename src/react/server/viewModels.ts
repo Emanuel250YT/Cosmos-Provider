@@ -11,7 +11,7 @@
  * provider SDKs these types come from.
  */
 
-import type { Charge, QuoteBreakdown, RampOrderData } from "@/core/types";
+import type { Charge, OfframpDeposit, QuoteBreakdown, RampOrderData } from "@/core/types";
 import type { APIOrder, DepositInstructions } from "@/types/index";
 import type { SummaryRowProps } from "../primitives/SummaryRow";
 import type { DetailRowProps } from "../primitives/DetailRow";
@@ -36,15 +36,54 @@ function formatFiat(amount: number, currency: string): string {
   }
 }
 
-/** Order summary rows (subtotal/fee/total-style breakdown) from a quote. */
+/**
+ * Order summary rows (subtotal/fee/total-style breakdown) from a quote.
+ *
+ * The middle rows depend on who priced it. An oracle-priced quote shows the
+ * mid rate and your spread, because those are the two numbers that produced
+ * it. A provider-priced one (`source: "provider"`) shows the provider's own
+ * fee instead and no spread row — the engine applied none, and rendering
+ * "0.00%" there would imply the rail is free.
+ */
 export function quoteToSummaryRows(quote: QuoteBreakdown): SummaryRowProps[] {
-  const feeRate = quote.effectiveRate - quote.rate;
-  return [
+  const rows: SummaryRowProps[] = [
     { label: `${quote.asset} amount`, value: quote.cryptoAmount.toString() },
-    { label: "Rate", value: formatFiat(quote.rate, quote.currency) },
-    ...(feeRate !== 0 ? [{ label: "Spread", value: `${(quote.spread * 100).toFixed(2)}%` }] : []),
-    { label: "Total", value: formatFiat(quote.fiatAmount, quote.currency), size: 18, weight: 700 },
+    { label: "Rate", value: `${formatFiat(quote.effectiveRate, quote.currency)} / ${quote.asset}` },
   ];
+  if (quote.fee && quote.fee.amount > 0) {
+    rows.push({ label: "Provider fee", value: `${quote.fee.amount} ${quote.fee.currency}` });
+  } else if (quote.source !== "provider" && quote.spread > 0) {
+    rows.push({ label: "Fee", value: `${(quote.spread * 100).toFixed(2)}%` });
+  }
+  rows.push({ label: "Total", value: formatFiat(quote.fiatAmount, quote.currency), size: 18, weight: 700 });
+  return rows;
+}
+
+/**
+ * The rows a seller must act on to fund an offramp order: exact amount,
+ * address, memo, and network.
+ *
+ * Every one of these is copyable and none are truncated away, because each
+ * is a way to lose the funds — a transfer to the right address on the wrong
+ * chain, or without the memo that identifies it in a pooled account, is
+ * generally not recoverable. The memo row is labelled as required when the
+ * provider gave one, rather than being presented as an optional extra.
+ */
+export function offrampDepositToDetailRows(deposit: OfframpDeposit): DetailRowProps[] {
+  const rows: DetailRowProps[] = [
+    { label: "Send exactly", value: `${deposit.amount} ${deposit.asset}` },
+    { label: "To address", value: deposit.address, copyable: true },
+  ];
+  if (deposit.memo) {
+    rows.push({ label: `Memo (required)`, value: deposit.memo, copyable: true, valueColor: "#B45309" });
+  }
+  if (deposit.network) rows.push({ label: "Network", value: deposit.chainId ?? deposit.network });
+  if (deposit.fiatAmount !== undefined && deposit.currency) {
+    rows.push({ label: "You receive", value: formatFiat(deposit.fiatAmount, deposit.currency) });
+  }
+  if (deposit.reference) rows.push({ label: "Reference", value: deposit.reference, copyable: true });
+  if (deposit.expiresAt) rows.push({ label: "Expires", value: new Date(deposit.expiresAt).toLocaleString() });
+  return rows;
 }
 
 /**

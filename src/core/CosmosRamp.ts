@@ -92,10 +92,12 @@ export interface OfframpParams {
   asset?: CryptoAssetCode;
   /** Fiat currency to pay out. */
   currency: FiatCurrencyCode;
-  /** Provider-specific payout destination (CVU, PIX key, MP email...). */
+  /** Provider-specific payout destination (CVU, PIX key, BREB key, CPF/tax id, MP email...). */
   destination?: Record<string, unknown>;
   spread?: number;
   metadata?: Record<string, unknown>;
+  /** Provider-specific pass-through options. */
+  providerOptions?: Record<string, unknown>;
 }
 
 /** Outcome of processing an incoming provider webhook. */
@@ -194,7 +196,16 @@ export class CosmosRamp extends TypedEventEmitter<RampEvents> {
   // Quotes
   // -------------------------------------------------------------------------
 
-  /** Take a quote without creating an order. */
+  /**
+   * Take a quote without creating an order.
+   *
+   * Pass `provider` and the quote comes from that rail's own pricing when it
+   * publishes any ({@link PaymentProvider.getQuote}) — the real number the
+   * user will be charged there, fee included, which is the only basis on
+   * which two rails can honestly be compared. Without `provider` (or for a
+   * rail that only collects fiat, like Mercado Pago) it falls back to the
+   * oracle mid rate plus your spread, which is identical whoever collects.
+   */
   async quote(params: {
     direction: RampDirection;
     currency: FiatCurrencyCode;
@@ -202,11 +213,24 @@ export class CosmosRamp extends TypedEventEmitter<RampEvents> {
     amount?: number;
     cryptoAmount?: number;
     spread?: number;
+    /** Price on this rail specifically, when it prices its own orders. */
+    provider?: string;
+    /** Payment method, for rails that price per method. */
+    method?: PaymentMethod;
+    providerOptions?: Record<string, unknown>;
   }): Promise<QuoteBreakdown> {
     const asset = params.asset ?? this.#defaultAsset;
     const spread = params.spread ?? this.#defaultSpread;
     if (spread < 0 || spread >= 1) {
       throw new CosmosError(`Invalid spread ${spread}. Use a fraction like 0.02 for 2%.`);
+    }
+    if (params.amount === undefined && params.cryptoAmount === undefined) {
+      throw new CosmosError("Provide either `amount` (fiat) or `cryptoAmount`.");
+    }
+
+    const provider = params.provider ? this.provider(params.provider) : undefined;
+    if (provider?.getQuote) {
+      return this.#providerQuote(provider, { ...params, asset });
     }
 
     const rate = await this.oracle.getRate(asset, params.currency);
@@ -217,11 +241,9 @@ export class CosmosRamp extends TypedEventEmitter<RampEvents> {
     if (params.amount !== undefined) {
       fiatAmount = round(params.amount, 2);
       cryptoAmount = round(params.amount / effectiveRate, 6);
-    } else if (params.cryptoAmount !== undefined) {
-      cryptoAmount = round(params.cryptoAmount, 6);
-      fiatAmount = round(params.cryptoAmount * effectiveRate, 2);
     } else {
-      throw new CosmosError("Provide either `amount` (fiat) or `cryptoAmount`.");
+      cryptoAmount = round(params.cryptoAmount!, 6);
+      fiatAmount = round(params.cryptoAmount! * effectiveRate, 2);
     }
 
     return {
@@ -233,6 +255,64 @@ export class CosmosRamp extends TypedEventEmitter<RampEvents> {
       fiatAmount,
       cryptoAmount,
       quotedAt: Date.now(),
+      source: "oracle",
+    };
+  }
+
+  /**
+   * Normalize a provider's own quote into a {@link QuoteBreakdown}.
+   *
+   * `spread` is 0 here and `rate` equals `effectiveRate` on purpose: the
+   * provider quoted a single all-in price and the engine applied nothing on
+   * top, so presenting a mid rate and a spread would be inventing a
+   * breakdown the provider never gave. What it *does* publish — its fee —
+   * is carried verbatim in `fee`.
+   */
+  async #providerQuote(
+    provider: PaymentProvider,
+    params: {
+      direction: RampDirection;
+      currency: FiatCurrencyCode;
+      asset: CryptoAssetCode;
+      amount?: number;
+      cryptoAmount?: number;
+      method?: PaymentMethod;
+      providerOptions?: Record<string, unknown>;
+    },
+  ): Promise<QuoteBreakdown> {
+    const quoted = await provider.getQuote!({
+      direction: params.direction,
+      currency: params.currency.toUpperCase(),
+      asset: params.asset,
+      amount: params.amount,
+      cryptoAmount: params.cryptoAmount,
+      method: params.method,
+      providerOptions: params.providerOptions,
+    });
+
+    const fiatAmount = round(quoted.fiatAmount, 2);
+    const cryptoAmount = round(quoted.cryptoAmount, 6);
+    if (!(fiatAmount > 0) || !(cryptoAmount > 0)) {
+      throw new CosmosError(
+        `Provider "${provider.name}" returned an unusable quote (${fiatAmount} ${params.currency} ↔ ${cryptoAmount} ${params.asset}).`,
+      );
+    }
+    const rate = round(fiatAmount / cryptoAmount, 8);
+
+    return {
+      asset: params.asset,
+      currency: params.currency.toUpperCase(),
+      rate,
+      spread: 0,
+      effectiveRate: rate,
+      fiatAmount,
+      cryptoAmount,
+      quotedAt: Date.now(),
+      source: "provider",
+      provider: provider.name,
+      providerQuoteId: quoted.quoteId,
+      fee: quoted.fee,
+      expiresAt: quoted.expiresAt,
     };
   }
 
@@ -257,6 +337,9 @@ export class CosmosRamp extends TypedEventEmitter<RampEvents> {
       amount: params.amount,
       cryptoAmount: params.cryptoAmount,
       spread: params.spread,
+      provider: provider.name,
+      method: params.method,
+      providerOptions: params.providerOptions,
     });
 
     const id = randomUUID();
@@ -268,6 +351,11 @@ export class CosmosRamp extends TypedEventEmitter<RampEvents> {
       description: params.description,
       payer: params.payer,
       expiresInMinutes: params.expiresInMinutes,
+      // Rails that priced this order themselves need their own quote id back
+      // (see CreateChargeRequest.quote) — re-quoting inside createCharge would
+      // charge a price the user was never shown.
+      quote,
+      destinationAddress: params.wallet,
       providerOptions: params.providerOptions,
     };
     const charge = await provider.createCharge(chargeRequest);
@@ -312,16 +400,37 @@ export class CosmosRamp extends TypedEventEmitter<RampEvents> {
       asset: params.asset,
       cryptoAmount: params.cryptoAmount,
       spread: params.spread,
+      provider: provider.name,
+      providerOptions: params.providerOptions,
     });
+
+    const id = randomUUID();
+    // Rails that custody the crypto leg only mint the deposit address (and
+    // its memo) once the order exists on their side — ask for it now, so the
+    // order the caller gets back can actually tell the user where to send
+    // funds. Rails where you collect the crypto yourself skip this entirely.
+    const deposit = provider.createOfframpDeposit
+      ? await provider.createOfframpDeposit({
+          cryptoAmount: quote.cryptoAmount,
+          asset: quote.asset,
+          currency: quote.currency,
+          reference: id,
+          destination: params.destination ?? {},
+          quote,
+          providerOptions: params.providerOptions,
+        })
+      : undefined;
 
     const now = Date.now();
     const order: RampOrderData = {
-      id: randomUUID(),
+      id,
       direction: "offramp",
       status: "created",
       provider: provider.name,
       quote,
       payoutDestination: params.destination,
+      deposit,
+      chargeId: deposit?.id,
       metadata: params.metadata,
       createdAt: now,
       updatedAt: now,
@@ -368,6 +477,15 @@ export class CosmosRamp extends TypedEventEmitter<RampEvents> {
         this.emit("error", error as Error);
         throw new SettlementError(`Fiat payout failed for order ${orderId}.`, { cause: error });
       }
+    } else if (order.deposit) {
+      // The provider custodies the crypto and pays the fiat out itself (it
+      // gave us the deposit address), so there's no payout call to make —
+      // but it isn't done either. Park it in "settling" and let the caller
+      // confirm from the provider's own transaction status; completing it
+      // here would claim a payout nobody has seen land.
+      updated = (await this.store.update(orderId, { status: "settling" }))!;
+      this.emit("payout:required", updated);
+      await this.#broadcast("payout.required", updated);
     } else {
       // No automatic payout rail: hand off to the integrator.
       this.emit("payout:required", updated);

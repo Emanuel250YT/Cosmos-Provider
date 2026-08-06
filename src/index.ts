@@ -62,6 +62,8 @@ export type {
 } from "@/providers/custom/CustomProvider";
 export { EtherfuseProvider } from "@/providers/etherfuse/EtherfuseProvider";
 export type { EtherfuseProviderOptions } from "@/providers/etherfuse/EtherfuseProvider";
+export { AbroadProvider, ABROAD_ASSETS } from "@/providers/abroad/AbroadProvider";
+export type { AbroadProviderOptions } from "@/providers/abroad/AbroadProvider";
 
 // Outgoing webhooks (signed deliveries) + receiver-side verification
 export {
@@ -87,6 +89,11 @@ export type {
   WebSocketConstructorLike,
   WebSocketLike,
 } from "@/client/WebSocketManager";
+
+// Abroad Finance (BRL/PIX and COP/BREB <-> USDC — mainnet only, no sandbox)
+export { AbroadClient, ABROAD_BASE_URL, AbroadError, AbroadQuoteError, AbroadKycRequiredError } from "@/client/abroad";
+export type { AbroadClientOptions } from "@/client/abroad";
+export type * from "@/client/abroad/types";
 
 // Koywe anchor (ARS/CLP/MXN/COP/PEN/BRL <-> USDC on Stellar)
 export { KoyweClient, resolveFiatLimits, KoyweError, isValidStellarPublicKey } from "@/client/koywe";
