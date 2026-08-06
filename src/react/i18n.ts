@@ -102,6 +102,8 @@ const en = {
   scanToPay: "Scan to pay",
   continueFromPhone: "Continue from your phone",
   openPaymentLink: "Open payment link",
+  /** Shown on the payment-link button once it has been opened, while the checkout is still outstanding. */
+  paymentLinkOpened: "Payment in process…",
   copyCode: "Copy code",
 };
 
@@ -188,6 +190,7 @@ const es: Record<keyof typeof en, string> = {
   scanToPay: "Escaneá para pagar",
   continueFromPhone: "Continuá desde tu teléfono",
   openPaymentLink: "Abrir link de pago",
+  paymentLinkOpened: "Pago en proceso…",
   copyCode: "Copiar código",
 };
 
@@ -274,6 +277,7 @@ const pt: Record<keyof typeof en, string> = {
   scanToPay: "Escaneie para pagar",
   continueFromPhone: "Continue pelo seu celular",
   openPaymentLink: "Abrir link de pagamento",
+  paymentLinkOpened: "Pagamento em andamento…",
   copyCode: "Copiar código",
 };
 

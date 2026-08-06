@@ -50,24 +50,29 @@
  * (mock) or must genuinely check status (sandbox or real). It's always empty
  * in production mode.
  *
- * Once an order is created, the page polls `/api/status` (a pure read —
- * no side effects) every 5s waiting for it to land as `completed`, same as
- * a real integration waiting on its webhook handler to update the order
- * store. That's "Real" confirmation mode (the default, no button — just a
- * wait). The FAB's "Test" confirmation mode additionally surfaces a manual
- * control that calls `/api/confirm`/`/api/sellConfirm`: for a mock-backed
- * provider that instantly fakes the webhook/deposit; for a real Mercado
- * Pago account (no sandbox "simulate payment" endpoint exists) it instead
- * polls the real charge status right now instead of waiting for the next
- * tick — never fabricated, so it only completes once someone has genuinely
- * paid the sandbox charge.
+ * CONFIRMING AN ORDER — two paths, and only one of them is honest:
+ *   - "Real" mode (default, no button): the page polls `/api/status` every
+ *     5s. That endpoint verifies — it reads the actual charge from the
+ *     provider and completes the order only if someone genuinely paid. This
+ *     is what a production integration relies on (its webhook handler lands
+ *     the same state; the poll is this demo's backstop for when the tunnel
+ *     carrying those webhooks is down).
+ *   - "Test" mode (FAB): adds a manual control calling `/api/confirm`, which
+ *     OVERRIDES rather than checks. Against a real Mercado Pago account it
+ *     skips Mercado Pago outright and releases the crypto with no verified
+ *     fiat payment — the only way to exercise the settlement leg without
+ *     literally buying from yourself. On mainnet that spends real USDC out of
+ *     the distributor, so treat the endpoint as privileged: it is
+ *     unauthenticated, like everything else here, and `PUBLIC_BASE_URL`
+ *     exposes it to whoever can reach the tunnel.
  *
  * Two things are deliberately real regardless of mock/live — see
  * examples/mercadopago/settlement-demo.ts for the full rationale:
  * - The rate: `CoinGeckoOracle`, no fixed/mocked number.
- * - The release: a REAL Stellar testnet transaction for a proper asset,
- *   EXCEPT for Etherfuse orders, which release their own crypto internally
- *   (this demo skips its own settlement for those — see `settlementFn`).
+ * - The release: a REAL Stellar transaction for a proper asset (testnet by
+ *   default, mainnet under STELLAR_NETWORK="public"), EXCEPT for Etherfuse
+ *   orders, which release their own crypto internally (this demo skips its
+ *   own settlement for those — see `settlementFn`).
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -204,16 +209,17 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     confirmationMode: "Confirmation mode",
     modeReal: "Real — wait for webhook",
     modeDev: "Test — mark as paid manually",
-    markAsPaid: "Mark as paid (simulate)",
+    markAsPaid: "Force release (skips Mercado Pago)",
     markAsReceived: "Mark as received (simulate)",
     youPay: "You pay",
     youReceive: "You receive",
     rateNote: "1 USDC ≈",
     trustlineTitle: "Enable USDC trustline",
-    trustlineBodyKit: "Your wallet doesn't have a trustline for this demo's USDC asset yet. Approve one now (a single, no-cost Stellar operation) so we can send you real testnet USDC.",
-    trustlineBodyManual: "This address doesn't have a trustline for this demo's USDC asset yet. Without one we can't send real testnet USDC to it — the order will still complete, but settlement will use a placeholder transaction id.",
+    trustlineBodyKit: "Your wallet doesn't have a trustline for the USDC this demo pays out. Approve one now (a single Stellar operation) — without it the USDC can't be delivered, so checkout won't let you pay.",
+    trustlineBodyManual: "This address doesn't have a trustline for the USDC this demo pays out, and we don't hold its key, so we can't open one for it. Open the trustline from the wallet that owns this address, or connect that wallet here instead. Until then checkout is blocked — paying without it would take your money and deliver nothing.",
     trustlineEnable: "Enable trustline",
-    trustlineContinueAnyway: "Continue anyway",
+    trustlineBack: "Use a different wallet",
+    trustlineCheckFailed: "Couldn't verify the trustline on this wallet. Try again — checkout stays blocked until we can confirm the USDC can actually be delivered.",
     trustlineChecking: "Checking your wallet…",
     trustlineSuccess: "Trustline enabled — continuing…",
     trustlineError: "Couldn't enable the trustline. You can try again or continue anyway.",
@@ -264,16 +270,17 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     confirmationMode: "Modo de confirmación",
     modeReal: "Real — esperar webhook",
     modeDev: "Prueba — marcar como pagado a mano",
-    markAsPaid: "Marcar como pagado (simular)",
+    markAsPaid: "Forzar liberación (omite Mercado Pago)",
     markAsReceived: "Marcar como recibido (simular)",
     youPay: "Pagás",
     youReceive: "Recibís",
     rateNote: "1 USDC ≈",
     trustlineTitle: "Habilitar trustline de USDC",
-    trustlineBodyKit: "Tu wallet todavía no tiene una trustline para el USDC de este demo. Aprobá una ahora (una única operación de Stellar sin costo) para que podamos enviarte USDC real de testnet.",
-    trustlineBodyManual: "Esta dirección todavía no tiene una trustline para el USDC de este demo. Sin ella no podemos enviarle USDC real de testnet — la orden se va a completar igual, pero el settlement va a usar un id de transacción de prueba.",
+    trustlineBodyKit: "Tu wallet todavía no tiene una trustline para el USDC que entrega este demo. Aprobala ahora (una única operación de Stellar) — sin ella no podemos enviarte el USDC, así que el checkout no te va a dejar pagar.",
+    trustlineBodyManual: "Esta dirección todavía no tiene una trustline para el USDC que entrega este demo, y como no tenemos su clave no podemos abrirla por vos. Abrila desde la wallet dueña de esa dirección, o conectá esa wallet acá. Hasta entonces el checkout queda bloqueado — pagar sin la trustline sería perder la plata sin recibir nada.",
     trustlineEnable: "Habilitar trustline",
-    trustlineContinueAnyway: "Continuar igual",
+    trustlineBack: "Usar otra wallet",
+    trustlineCheckFailed: "No pudimos verificar la trustline de esta wallet. Probá de nuevo — el checkout queda bloqueado hasta poder confirmar que el USDC se puede entregar.",
     trustlineChecking: "Verificando tu wallet…",
     trustlineSuccess: "Trustline habilitada — continuando…",
     trustlineError: "No pudimos habilitar la trustline. Podés reintentar o continuar igual.",
@@ -324,16 +331,17 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     confirmationMode: "Modo de confirmação",
     modeReal: "Real — aguardar webhook",
     modeDev: "Teste — marcar como pago manualmente",
-    markAsPaid: "Marcar como pago (simular)",
+    markAsPaid: "Forçar liberação (ignora o Mercado Pago)",
     markAsReceived: "Marcar como recebido (simular)",
     youPay: "Você paga",
     youReceive: "Você recebe",
     rateNote: "1 USDC ≈",
     trustlineTitle: "Habilitar trustline de USDC",
-    trustlineBodyKit: "Sua wallet ainda não tem uma trustline para o USDC deste demo. Aprove uma agora (uma única operação Stellar sem custo) para que possamos enviar USDC real de testnet.",
-    trustlineBodyManual: "Este endereço ainda não tem uma trustline para o USDC deste demo. Sem ela não conseguimos enviar USDC real de testnet — o pedido vai ser concluído mesmo assim, mas o settlement vai usar um id de transação de teste.",
+    trustlineBodyKit: "Sua wallet ainda não tem uma trustline para o USDC que este demo entrega. Aprove agora (uma única operação Stellar) — sem ela não conseguimos enviar o USDC, então o checkout não vai deixar você pagar.",
+    trustlineBodyManual: "Este endereço ainda não tem uma trustline para o USDC que este demo entrega, e como não temos a chave dele não podemos abri-la por você. Abra a trustline pela wallet dona desse endereço, ou conecte essa wallet aqui. Até lá o checkout fica bloqueado — pagar sem ela seria perder o dinheiro sem receber nada.",
     trustlineEnable: "Habilitar trustline",
-    trustlineContinueAnyway: "Continuar mesmo assim",
+    trustlineBack: "Usar outra wallet",
+    trustlineCheckFailed: "Não conseguimos verificar a trustline desta wallet. Tente de novo — o checkout fica bloqueado até confirmarmos que o USDC pode ser entregue.",
     trustlineChecking: "Verificando sua wallet…",
     trustlineSuccess: "Trustline habilitada — continuando…",
     trustlineError: "Não conseguimos habilitar a trustline. Você pode tentar de novo ou continuar mesmo assim.",
@@ -404,24 +412,46 @@ function getWalletKitBundle(): Promise<string> {
 // Providers, oracle, settlement — Simulated and Live variants.
 // ---------------------------------------------------------------------------
 
-const stellarServer = new Horizon.Server("https://horizon-testnet.stellar.org");
+/**
+ * WHICH STELLAR NETWORK THE CRYPTO LEG SETTLES ON — `STELLAR_NETWORK`,
+ * "testnet" (default) or "public". The two modes are genuinely different
+ * arrangements, not one flag:
+ *
+ *   testnet — this process ISSUES the asset it pays out. An issuing account
+ *     can send its own asset with no balance and no trustline of its own, so
+ *     "funding the treasury" is just Friendbot-funding one account for fees.
+ *     The "USDC" a buyer receives is this demo's own token, worth nothing.
+ *
+ *   public — nobody can issue Circle's USDC, so payouts come from a
+ *     DISTRIBUTOR account you own that already holds a real USDC balance
+ *     (`STELLAR_DISTRIBUTOR_SECRET`), paying out the asset issued by
+ *     `STELLAR_USDC_ISSUER` (Circle's mainnet issuer by default). Every
+ *     release spends real USDC. No Friendbot exists here: the distributor
+ *     must be funded with XLM for fees, and the buyer's wallet must already
+ *     trust the asset — this demo cannot open a trustline on their behalf.
+ */
+const STELLAR_NETWORK = (process.env.STELLAR_NETWORK?.trim() || "testnet").toLowerCase();
+if (STELLAR_NETWORK !== "testnet" && STELLAR_NETWORK !== "public") {
+  console.error(`✘ Unknown STELLAR_NETWORK="${STELLAR_NETWORK}" in .env.${DEMO_ENV} — expected "testnet" or "public".`);
+  process.exit(1);
+}
+const IS_MAINNET = STELLAR_NETWORK === "public";
+const NETWORK_PASSPHRASE = IS_MAINNET ? Networks.PUBLIC : Networks.TESTNET;
+const HORIZON_URL = process.env.STELLAR_HORIZON_URL?.trim() || (IS_MAINNET ? "https://horizon.stellar.org" : "https://horizon-testnet.stellar.org");
+/** stellar.expert path segment for this network — used by `stellarExpertTxUrl`. */
+const EXPLORER_NETWORK = IS_MAINNET ? "public" : "testnet";
+/** Circle's USDC on Stellar mainnet. Only consulted when IS_MAINNET. */
+const CIRCLE_USDC_ISSUER = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN";
+
+const stellarServer = new Horizon.Server(HORIZON_URL);
 const mp = createMockMercadoPago({ webhookSecret: WEBHOOK_SECRET });
 
-// Doubles as the "treasury": the account that issues an asset can send it
-// directly, with no trustline of its own — issuing IS just a payment.
-//
-// Defaults to a fresh, throwaway keypair every server start (simplest for a
-// one-off demo run) — but that means every restart mints a DIFFERENT USDC
-// (same code, different issuer = a different Stellar asset), so anything
-// released by a previous run becomes worthless, and any pre-funded balance
-// on that old issuer is gone. Set STELLAR_ISSUER_SECRET in `.env` to reuse
-// the SAME issuer account across restarts instead — one real testnet secret
-// key (e.g. from `Keypair.random().secret()` or Stellar Laboratory's
-// "Generate keypair"), funded once. Never a mainnet secret; this signs real
-// (if testnet-only) payments on every settlement.
-function loadIssuerKeypair(): Keypair {
-  const secret = process.env.STELLAR_ISSUER_SECRET?.trim();
-  if (!secret) return Keypair.random();
+/** Parse a Stellar secret from the environment, failing loudly rather than silently degrading. */
+function requireKeypair(envName: string, secret: string | undefined, hint: string): Keypair {
+  if (!secret) {
+    console.error(`✘ ${envName} is required in .env.${DEMO_ENV} when STELLAR_NETWORK="public".\n  ${hint}`);
+    process.exit(1);
+  }
   try {
     return Keypair.fromSecret(secret);
   } catch (error) {
@@ -430,44 +460,148 @@ function loadIssuerKeypair(): Keypair {
     // truncated copy/paste, etc. Fail loudly with a clear, actionable
     // message here instead of letting that exception bubble up as an opaque
     // Stellar SDK stack trace (or, worse, silently falling back to a random
-    // issuer — that would look like it "took" when it didn't).
+    // key — that would look like it "took" when it didn't).
     console.error(
-      `✘ STELLAR_ISSUER_SECRET in .env.${DEMO_ENV} is not a valid Stellar secret key (${String((error as Error).message ?? error)}).\n` +
-        `  It must start with "S" and be 56 characters — generate one with:\n` +
-        `  node -e "console.log(require('@stellar/stellar-sdk').Keypair.random().secret())"`,
+      `✘ ${envName} in .env.${DEMO_ENV} is not a valid Stellar secret key (${String((error as Error).message ?? error)}).\n` +
+        `  It must start with "S" and be 56 characters.`,
     );
     process.exit(1);
   }
 }
-const issuer = loadIssuerKeypair();
-const ISSUER_SOURCE = process.env.STELLAR_ISSUER_SECRET?.trim() ? `from STELLAR_ISSUER_SECRET in .env.${DEMO_ENV}` : "random — set STELLAR_ISSUER_SECRET to reuse the same one across restarts";
+
+// Testnet only. Doubles as the "treasury": the account that issues an asset
+// can send it directly, with no trustline of its own — issuing IS just a
+// payment.
+//
+// Defaults to a fresh, throwaway keypair every server start (simplest for a
+// one-off demo run) — but that means every restart mints a DIFFERENT USDC
+// (same code, different issuer = a different Stellar asset), so anything
+// released by a previous run becomes worthless, and any pre-funded balance
+// on that old issuer is gone. Set STELLAR_ISSUER_SECRET in `.env` to reuse
+// the SAME issuer account across restarts instead — one real testnet secret
+// key (e.g. from `Keypair.random().secret()` or Stellar Laboratory's
+// "Generate keypair"), funded once. Never a mainnet secret.
+function loadIssuerKeypair(): Keypair {
+  const secret = process.env.STELLAR_ISSUER_SECRET?.trim();
+  if (!secret) return Keypair.random();
+  return requireKeypair("STELLAR_ISSUER_SECRET", secret, "");
+}
+
+/**
+ * The account that SIGNS and funds every release, and the asset it pays out.
+ *
+ * On testnet these are the same account twice over (the issuer pays out what
+ * it issues). On mainnet they're deliberately separate: `payer` is your
+ * distributor, `assetIssuer` is Circle.
+ */
+const settlementSource = IS_MAINNET
+  ? (() => {
+      const payer = requireKeypair(
+        "STELLAR_DISTRIBUTOR_SECRET",
+        process.env.STELLAR_DISTRIBUTOR_SECRET?.trim(),
+        "It's the mainnet account that holds the USDC this demo pays out (and the XLM for fees).",
+      );
+      const assetIssuer = process.env.STELLAR_USDC_ISSUER?.trim() || CIRCLE_USDC_ISSUER;
+      return { payer, assetIssuer, selfIssued: false };
+    })()
+  : (() => {
+      const issuerKp = loadIssuerKeypair();
+      return { payer: issuerKp, assetIssuer: issuerKp.publicKey(), selfIssued: true };
+    })();
+
+/** Kept as `issuer` for continuity: the account the settlement asset is issued BY (Circle on mainnet, this demo on testnet). */
+const issuer = settlementSource.payer;
+const ISSUER_SOURCE = IS_MAINNET
+  ? `distributor ${settlementSource.payer.publicKey()} paying out USDC issued by ${settlementSource.assetIssuer}`
+  : process.env.STELLAR_ISSUER_SECRET?.trim()
+    ? `from STELLAR_ISSUER_SECRET in .env.${DEMO_ENV}`
+    : "random — set STELLAR_ISSUER_SECRET to reuse the same one across restarts";
 // Matches CosmosRamp's default `defaults.asset` ("USDC") — neither ramp
 // instance below overrides it, so every order settles in this asset.
 const DEMO_ASSET_CODE = "USDC";
+/** The exact asset every release pays out — what a receiving wallet must trust. */
+const SETTLEMENT_ASSET = new StellarAsset(DEMO_ASSET_CODE, settlementSource.assetIssuer);
 // Populated by generateDemoWallet() below — settlement needs each receiving
 // wallet's own keypair to sign the trustline it opens for itself. Wallets
 // connected via Stellar Wallets Kit (the primary path) are NOT in here — the
 // server never holds their key — so they open their own trustline via the
 // /api/trustline* actions below (see wallet-kit-client.ts's signStellarTransaction).
+// Never populated on mainnet: there's no Friendbot to fund such a wallet.
 const walletByAddress = new Map<string, Keypair>();
 let stellarReady = false;
-try {
-  // Already funded (a reused STELLAR_ISSUER_SECRET from a prior run) — skip
-  // Friendbot entirely; calling it on an account that already exists just
-  // errors (`createAccount` fails if the destination already exists).
-  await stellarServer.loadAccount(issuer.publicKey());
-  stellarReady = true;
-  console.log(`✔ Demo USDC issuer already funded: ${issuer.publicKey()} (${ISSUER_SOURCE})`);
-} catch {
+
+/**
+ * Is the paying account live and able to settle?
+ *
+ * Re-probed on demand rather than latched at boot: Horizon is occasionally
+ * slow enough to time out, and a single failed probe at startup used to leave
+ * `stellarReady` false for the entire process — every settlement for the rest
+ * of the run silently degrading to a fake tx id over a blip that had long
+ * since cleared. Cheap to retry (one `loadAccount`), and once true it stays
+ * true.
+ *
+ * On mainnet an unfunded/nonexistent distributor is fatal rather than
+ * Friendbot-able, so this reports false and checkout refuses to take money.
+ */
+async function ensureStellarReady(): Promise<boolean> {
+  if (stellarReady) return true;
+  try {
+    const account = await stellarServer.loadAccount(settlementSource.payer.publicKey());
+    stellarReady = true;
+    if (IS_MAINNET) {
+      const held = account.balances.find(
+        (b) => "asset_code" in b && b.asset_code === DEMO_ASSET_CODE && "asset_issuer" in b && b.asset_issuer === settlementSource.assetIssuer,
+      );
+      const balance = held && "balance" in held ? held.balance : null;
+      if (balance === null) {
+        console.warn(`⚠ MAINNET distributor ${settlementSource.payer.publicKey()} has NO trustline for ${DEMO_ASSET_CODE} (${settlementSource.assetIssuer}) — it holds none of the asset it's meant to pay out.`);
+      } else {
+        console.log(`✔ MAINNET distributor ready: ${settlementSource.payer.publicKey()} — ${balance} ${DEMO_ASSET_CODE} available`);
+      }
+    } else {
+      console.log(`✔ Demo USDC issuer already funded: ${settlementSource.payer.publicKey()} (${ISSUER_SOURCE})`);
+    }
+    return true;
+  } catch {
+    // Either not funded yet, or Horizon didn't answer.
+  }
+  if (IS_MAINNET) {
+    // No Friendbot on mainnet — this is a real account that must already exist.
+    console.warn(`⚠ Could not load the mainnet distributor ${settlementSource.payer.publicKey()} (unfunded account, or Horizon unreachable).`);
+    console.warn("  Checkout will be refused until it resolves — this demo won't take money it can't settle.");
+    return false;
+  }
   console.log(`Funding a Stellar testnet demo-USDC issuer (Friendbot)... (${ISSUER_SOURCE})`);
   try {
-    await stellarServer.friendbot(issuer.publicKey()).call();
+    await stellarServer.friendbot(settlementSource.payer.publicKey()).call();
     stellarReady = true;
-    console.log(`✔ Demo USDC issuer funded: ${issuer.publicKey()} (${ISSUER_SOURCE})`);
+    console.log(`✔ Demo USDC issuer funded: ${settlementSource.payer.publicKey()} (${ISSUER_SOURCE})`);
   } catch (error) {
-    console.warn("⚠ Could not reach Stellar testnet/Friendbot — settlement will fall back to a simulated tx id:", error);
+    console.warn(`⚠ Could not reach Stellar testnet/Friendbot: ${String(error)}`);
+    console.warn("  Checkout will be refused until it comes back — this demo won't take money it can't settle.");
   }
+  return stellarReady;
 }
+
+console.log(`Stellar settlement: ${IS_MAINNET ? "⚠ MAINNET (real USDC moves)" : "testnet (self-issued demo asset)"} via ${HORIZON_URL}`);
+
+// Real fiat charges are only allowed once the crypto leg is real too.
+// `MP_SANDBOX="false"` on a testnet settlement means genuine ARS/BRL out of a
+// buyer's account and a self-issued testnet token — worth nothing — back.
+// That combination is refused rather than left as a footgun one env var away;
+// with STELLAR_NETWORK="public" the pairing makes sense and this lets it run.
+if (!MP_SANDBOX && !IS_MAINNET) {
+  console.error(
+    `✘ MP_SANDBOX="false" with STELLAR_NETWORK="testnet" is refused: the fiat leg would be a real, chargeable\n` +
+      `  Mercado Pago preference while the crypto leg pays out this demo's own testnet token — real money in,\n` +
+      `  nothing of value out.\n` +
+      `  Either set MP_SANDBOX="true" (real account, no chargeable preferences), or set STELLAR_NETWORK="public"\n` +
+      `  with a funded STELLAR_DISTRIBUTOR_SECRET to settle in real USDC. See .env.production.example.`,
+  );
+  process.exit(1);
+}
+
+await ensureStellarReady();
 
 /**
  * A fresh, Friendbot-funded Stellar address to receive the settlement —
@@ -476,8 +610,11 @@ try {
  * explicitly requested; the primary path is Stellar Wallets Kit.
  */
 async function generateDemoWallet(): Promise<string> {
+  // Mainnet has no Friendbot: a fresh keypair would be an unfunded account
+  // that can't even hold a trustline, and settlement there spends real USDC.
+  if (IS_MAINNET) throw new Error("Throwaway demo wallets aren't available on mainnet — connect a real wallet that already trusts USDC.");
   const kp = Keypair.random();
-  if (stellarReady) {
+  if (await ensureStellarReady()) {
     try {
       await stellarServer.friendbot(kp.publicKey()).call();
       walletByAddress.set(kp.publicKey(), kp);
@@ -525,41 +662,70 @@ const settlementFn: SettlementFn = async ({ order, wallet, amount, asset }) => {
     console.log(`⛓ ${order.provider}: crypto already released internally by Etherfuse — skipping this demo's settlement.`);
     return { txId: `etherfuse-managed:${order.id}` };
   }
-  if (stellarReady && wallet) {
+  // Whether a failed release is allowed to degrade into a fake tx id. Fine
+  // for a mock-backed order (no money moved either way); NEVER for one whose
+  // fiat leg was a real Mercado Pago charge — pairing real money in with a
+  // `0xdemo…` id marks the order "completed" and tells the buyer they were
+  // paid when nothing was sent. Throwing instead leaves the order in
+  // "settling" for `ramp.retrySettlement(orderId)` once the cause is fixed.
+  const realMoney = !isMockBacked(order.provider);
+  if ((await ensureStellarReady()) && wallet) {
     try {
-      // Real Stellar asset (code = whatever `asset` the order actually
-      // requested — "USDC" by default), issued by the demo issuer above.
-      const stellarAsset = new StellarAsset(asset, issuer.publicKey());
-      const receiver = walletByAddress.get(wallet); // set only for server-generated demo wallets — we hold this key
+      // The asset actually being released. On testnet this demo issues it;
+      // on mainnet it's Circle's USDC and `payer` merely holds a balance of
+      // it. `asset` from the order is the code ("USDC" by default).
+      const stellarAsset = asset === DEMO_ASSET_CODE ? SETTLEMENT_ASSET : new StellarAsset(asset, settlementSource.assetIssuer);
+      const receiver = walletByAddress.get(wallet); // set only for server-generated demo wallets — we hold this key (testnet only)
       const trusts = await accountTrustsAsset(wallet, stellarAsset);
       if (!trusts && !receiver) {
         // A real, user-connected wallet with no trustline for this asset — we
         // don't hold its key, so we can't open the trustline on its behalf
-        // here. The wallet step's "enable trustline" prompt is meant to
-        // catch this before checkout; landing here means it was skipped
-        // (e.g. the user chose "continue anyway").
-        console.warn(`⚠ ${wallet} has no trustline for ${asset} and we don't hold its key — falling back to a simulated tx id.`);
+        // here. `assertWalletCanReceive` rejects this at checkout, before any
+        // charge exists, so reaching it means the trustline was REMOVED
+        // between checkout and payment.
+        const why = `${wallet} has no trustline for ${asset} (issuer ${stellarAsset.getIssuer()}) and this demo doesn't hold its key, so the release can't be made.`;
+        if (realMoney) throw new Error(`${why} The fiat payment WAS collected — open the trustline, then retry the settlement for order ${order.id}.`);
+        console.warn(`⚠ ${why} Falling back to a simulated tx id (mock-backed order — no real money involved).`);
       } else {
-        const account = await stellarServer.loadAccount(issuer.publicKey());
-        const builder = new TransactionBuilder(account, { fee: String(Number(BASE_FEE) * 2), networkPassphrase: Networks.TESTNET });
+        const account = await stellarServer.loadAccount(settlementSource.payer.publicKey());
+        // On mainnet the payer spends a real balance rather than issuing, so
+        // check it covers this release before building anything — a failed
+        // `op_underfunded` after the fiat was collected is the same stuck
+        // order, just discovered later and with a worse error.
+        if (!settlementSource.selfIssued) {
+          const held = account.balances.find(
+            (b) => "asset_code" in b && b.asset_code === stellarAsset.getCode() && "asset_issuer" in b && b.asset_issuer === stellarAsset.getIssuer(),
+          );
+          const available = held && "balance" in held ? Number(held.balance) : 0;
+          if (!held) throw new Error(`Distributor ${settlementSource.payer.publicKey()} has no trustline for ${asset} (${stellarAsset.getIssuer()}) — it can't hold, let alone send, the asset.`);
+          if (available < amount) throw new Error(`Distributor ${settlementSource.payer.publicKey()} holds ${available} ${asset} but this release needs ${amount}. Top it up, then retry the settlement for order ${order.id}.`);
+        }
+        const builder = new TransactionBuilder(account, { fee: String(Number(BASE_FEE) * 2), networkPassphrase: NETWORK_PASSPHRASE });
         // Trustline (if it's not already open) and payment go in the SAME
         // transaction: `changeTrust` sourced from the wallet, `payment`
-        // sourced from the issuer, signed by both — only reachable when we
-        // hold the wallet's key (the demo-wallet fallback).
+        // sourced from the payer, signed by both — only reachable when we
+        // hold the wallet's key (the testnet demo-wallet fallback).
         if (!trusts) builder.addOperation(Operation.changeTrust({ asset: stellarAsset, source: wallet }));
         builder.addOperation(Operation.payment({ destination: wallet, asset: stellarAsset, amount: String(Math.round(amount * 1e7) / 1e7) }));
         const tx = builder.setTimeout(30).build();
-        tx.sign(issuer);
+        tx.sign(settlementSource.payer);
         if (!trusts) tx.sign(receiver!);
         const result = await stellarServer.submitTransaction(tx);
         console.log(
-          `⛓ settlement: ${trusts ? "sent" : "opened trustline + sent"} ${amount} ${asset} (testnet, real asset) → ${wallet} — https://stellar.expert/explorer/testnet/tx/${result.hash}`,
+          `⛓ settlement: ${trusts ? "sent" : "opened trustline + sent"} ${amount} ${asset} (${IS_MAINNET ? "MAINNET, real USDC" : "testnet, self-issued asset"}) → ${wallet} — https://stellar.expert/explorer/${EXPLORER_NETWORK}/tx/${result.hash}`,
         );
         return { txId: result.hash };
       }
     } catch (error) {
+      if (realMoney) throw error instanceof Error ? error : new Error(String(error));
       console.warn(`⚠ Stellar settlement failed, falling back to a simulated tx id: ${String(error)}`);
     }
+  }
+  if (realMoney) {
+    throw new Error(
+      `Settlement could not run for order ${order.id} (${stellarReady ? "no destination wallet" : "Stellar unreachable"}), and its fiat leg was a real ${order.provider} charge — refusing to complete it with a simulated tx id. ` +
+        `Fix the cause and retry the settlement.`,
+    );
   }
   console.log(`⛓ settlement (simulated): sent ${amount} ${asset} → ${wallet}`);
   return { txId: `0xdemo${Date.now()}` };
@@ -576,7 +742,7 @@ const settlementFn: SettlementFn = async ({ order, wallet, amount, asset }) => {
  * to click through to.
  */
 function stellarExpertTxUrl(txId: string): string | undefined {
-  return /^[0-9a-f]{64}$/i.test(txId) ? `https://stellar.expert/explorer/testnet/tx/${txId}` : undefined;
+  return /^[0-9a-f]{64}$/i.test(txId) ? `https://stellar.expert/explorer/${EXPLORER_NETWORK}/tx/${txId}` : undefined;
 }
 
 // Etherfuse settles both Brazil (PIX/BRL) and Mexico (SPEI/MXN), so both
@@ -835,7 +1001,8 @@ function renderWalletBody(state: WizardState, lang: Lang): string {
     <input id="walletManualInput" type="text" placeholder="${t(lang, "walletPlaceholder")}" value="${manualValue}" style="${FIELD_STYLE_TIGHT};margin-bottom:0;flex:1;min-width:0" />
     <button type="button" id="useManualWalletBtn" onclick="useManualWallet()" style="flex-shrink:0;background:var(--cosmos-surface-alt);color:var(--cosmos-fg);border:1px solid var(--border);border-radius:10px;padding:11px 16px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">${t(lang, "useThisAddress")}</button>
   </div>
-  ${connected ? "" : `<button type="button" id="demoWalletLink" onclick="useDemoWallet()" style="background:none;border:none;color:var(--muted);font-size:12px;text-decoration:underline;cursor:pointer;padding:0;margin-bottom:16px;display:block">${t(lang, "useDemoWallet")}</button>`}
+  ${/* Throwaway wallets need Friendbot, which only exists on testnet. */ ""}
+  ${connected || IS_MAINNET ? "" : `<button type="button" id="demoWalletLink" onclick="useDemoWallet()" style="background:none;border:none;color:var(--muted);font-size:12px;text-decoration:underline;cursor:pointer;padding:0;margin-bottom:16px;display:block">${t(lang, "useDemoWallet")}</button>`}
   <p style="color:var(--muted);font-size:12px;margin:0 0 20px">${t(lang, "walletHint")}</p>
   <button onclick="continueWallet()" id="walletContinueBtn" style="${BUTTON_STYLE}"${connected ? "" : " disabled"}>${t(lang, "continueLabel")}</button>`;
 }
@@ -962,22 +1129,102 @@ function renderQuoteResult(quote: QuoteBreakdown): string {
 // see confirmOrder).
 // ---------------------------------------------------------------------------
 
+/**
+ * Orders whose fiat leg was collected but whose crypto release threw, by id
+ * → why. An order like that stays in "settling" (never "completed"), which on
+ * its own is indistinguishable from a settlement still in flight — this is
+ * what lets `/api/status` tell the buyer their money was taken and the USDC
+ * hasn't gone out, instead of spinning on "pending" forever.
+ */
+const settlementFailures = new Map<string, string>();
+
 async function finalizeOrder(order: RampOrderData): Promise<RampOrderData> {
   await ramp.store.update(order.id, { status: "paid" });
   const settling = (await ramp.store.update(order.id, { status: "settling" }))!;
-  const result = await settlementFn({ order: settling, asset: settling.quote.asset, amount: settling.quote.cryptoAmount, wallet: settling.wallet });
+  let result;
+  try {
+    result = await settlementFn({ order: settling, asset: settling.quote.asset, amount: settling.quote.cryptoAmount, wallet: settling.wallet });
+  } catch (error) {
+    const reason = (error as Error).message ?? String(error);
+    settlementFailures.set(order.id, reason);
+    console.error(`✘ settlement FAILED for order ${order.id} — leaving it in "settling", not completing it: ${reason}`);
+    throw error;
+  }
+  settlementFailures.delete(order.id);
   return (await ramp.store.update(order.id, { status: "completed", settlementTxId: result?.txId }))!;
 }
 
 /**
- * Confirms payment for an order, however that's actually possible:
+ * Refuse to create a charge the settlement leg couldn't honour. Called
+ * BEFORE `ramp.onramp` so a wallet that can't receive the asset costs the
+ * buyer nothing — once the charge exists, they can pay it, and for a real
+ * Mercado Pago account that money is genuinely gone.
+ *
+ * The blocking condition is a missing trustline on a wallet whose key the
+ * server doesn't hold: `settlementFn` can only bundle a `changeTrust` for the
+ * demo wallets in `walletByAddress`, so for a user-connected wallet the
+ * trustline has to already exist (the wallet step's prompt opens it via
+ * /api/trustline*). Etherfuse is exempt — it releases its own crypto and
+ * never touches this demo's asset.
+ */
+async function assertWalletCanReceive(wallet: string, providerName: string): Promise<void> {
+  if (providerName.startsWith("etherfuse")) return;
+  if (walletByAddress.has(wallet)) return; // server-held demo wallet — settlement opens the trustline itself
+  if (!(await ensureStellarReady())) {
+    throw new Error(
+      IS_MAINNET
+        ? `The payout account isn't ready (distributor ${settlementSource.payer.publicKey()} is unfunded, or Horizon is unreachable), so the ${DEMO_ASSET_CODE} couldn't be delivered. Checkout is blocked until it is.`
+        : "Stellar is unreachable right now, so the USDC couldn't be delivered — try again in a moment.",
+    );
+  }
+
+  if (await accountTrustsAsset(wallet, SETTLEMENT_ASSET)) return;
+
+  throw new Error(
+    `${wallet} has no trustline for ${DEMO_ASSET_CODE} (issuer ${SETTLEMENT_ASSET.getIssuer()}), so the ${DEMO_ASSET_CODE} could not be delivered after you paid. ` +
+      `Open the trustline first — go back to the wallet step and approve it — then check out again.`,
+  );
+}
+
+/**
+ * Read an order's REAL payment state from the provider API — never a
+ * simulation, so an unpaid charge simply reads back as unpaid.
+ *
+ * A Checkout Pro link can't be looked up by charge id: `order.charge.id` is
+ * the *preference* id there, and `/v1/payments/<preferenceId>` doesn't exist,
+ * so `getCharge` 404s no matter how genuinely the buyer paid. The payment MP
+ * creates carries the preference's `external_reference` (which CosmosRamp
+ * sets to the order id), so that's what finds it — see
+ * `MercadoPagoProvider.findChargeByReference`. Direct charges (PIX, in-store
+ * QR) DO store a real payment id, so they take the plain `getCharge` path.
+ *
+ * Returns null when there's simply no payment yet.
+ */
+async function readRealChargeState(order: RampOrderData): Promise<{ status: string } | null> {
+  const provider = ramp.providers.find((p) => p.name === order.provider);
+  if (!provider || !order.charge) return null;
+  if (provider instanceof MercadoPagoProvider && order.charge.method === "link") {
+    return await provider.findChargeByReference(order.id);
+  }
+  return await provider.getCharge(order.charge.id);
+}
+
+/**
+ * The "Test" confirmation mode's manual control — a deliberate OVERRIDE, not
+ * a status check. It forces the order to complete and releases the crypto
+ * leg, whatever the fiat leg actually did:
  * - Etherfuse: triggers the REAL sandbox deposit simulation
- *   (`client.sandbox.fiatReceived`), then finalizes directly — Etherfuse has
- *   no local webhook to receive, sandbox or not.
- * - Real Mercado Pago account: polls the REAL charge status — Mercado Pago
- *   has no sandbox "simulate payment" endpoint, so nothing is fabricated;
- *   this only completes once someone has genuinely paid.
+ *   (`client.sandbox.fiatReceived`), then finalizes.
  * - Mock-backed Mercado Pago: the local simulator's mock webhook flow.
+ * - Real Mercado Pago account: SKIPS Mercado Pago entirely. There's no
+ *   sandbox "simulate payment" endpoint to call, and requiring a genuine
+ *   payment makes the crypto leg impossible to exercise without actually
+ *   buying from yourself. So this releases the asset with NO verified fiat
+ *   payment — on mainnet that spends real USDC out of the distributor.
+ *
+ * The unforced path is `/api/status` (the 5s poll), which never fabricates
+ * anything: it reads the real charge and only completes an order someone
+ * genuinely paid. That's the one a production integration relies on.
  */
 async function confirmOrder(orderId: string): Promise<{ resultHtml?: string; pending?: boolean }> {
   const order = await ramp.getOrder(orderId);
@@ -991,10 +1238,12 @@ async function confirmOrder(orderId: string): Promise<{ resultHtml?: string; pen
   }
 
   if (!isMockBacked(order.provider)) {
-    const provider = ramp.providers.find((p) => p.name === order.provider);
-    if (!provider) throw new Error(`Provider ${order.provider} is not registered.`);
-    const state = await provider.getCharge(order.charge.id);
-    if (state.status !== "approved") return { pending: true };
+    if (!ramp.providers.some((p) => p.name === order.provider)) throw new Error(`Provider ${order.provider} is not registered.`);
+    console.warn(
+      `⚠ FORCED completion of order ${order.id} (${order.provider}) — the manual control does NOT consult Mercado Pago, ` +
+        `so no fiat payment has been verified. Releasing ${order.quote.cryptoAmount} ${order.quote.asset}` +
+        `${IS_MAINNET ? " of REAL mainnet USDC from the distributor" : " (testnet)"} → ${order.wallet}.`,
+    );
     const updated = await finalizeOrder(order);
     return { resultHtml: renderReceipt(updated) };
   }
@@ -1029,6 +1278,13 @@ const actions: Record<string, Action> = {
     const wallet = typeof body.wallet === "string" ? body.wallet.trim() : "";
     if (!wallet) throw new Error("Connect a destination wallet before checking out.");
 
+    // Check the crypto leg CAN be delivered before asking anyone for money.
+    // Settlement can't open a trustline for a wallet whose key the server
+    // doesn't hold, so a missing one means the fiat gets collected and the
+    // USDC never arrives — the exact way to lose a buyer's funds. Fail here,
+    // where nothing has been charged yet, rather than at settlement.
+    await assertWalletCanReceive(wallet, providerName);
+
     const order = await ramp.onramp({
       provider: providerName,
       amount,
@@ -1050,8 +1306,7 @@ const actions: Record<string, Action> = {
   async checkTrustline(body) {
     const wallet = typeof body.wallet === "string" ? body.wallet.trim() : "";
     if (!isValidStellarAddress(wallet)) return { trusts: false };
-    const stellarAsset = new StellarAsset(DEMO_ASSET_CODE, issuer.publicKey());
-    return { trusts: await accountTrustsAsset(wallet, stellarAsset) };
+    return { trusts: await accountTrustsAsset(wallet, SETTLEMENT_ASSET) };
   },
 
   /**
@@ -1059,32 +1314,36 @@ const actions: Record<string, Action> = {
    * demo USDC asset — the browser signs it with whichever wallet the user
    * connected (Stellar Wallets Kit's `signTransaction`, see
    * wallet-kit-client.ts), then POSTs the signed XDR to `submitTrustline`
-   * below. The server never touches this wallet's private key. Auto-funds
-   * `wallet` via Friendbot first if it has no XLM yet on testnet — common for
-   * a freshly created wallet — since a account needs to exist to have a
-   * sequence number to build a transaction from.
+   * below. The server never touches this wallet's private key. On testnet,
+   * auto-funds `wallet` via Friendbot first if it has no XLM yet — common for
+   * a freshly created wallet — since an account needs to exist to have a
+   * sequence number to build a transaction from. On mainnet there's no
+   * Friendbot: an account that doesn't exist yet has to be funded by its
+   * owner, and a trustline needs an extra ~0.5 XLM of reserve on top.
    */
   async trustlineTransaction(body) {
     const wallet = typeof body.wallet === "string" ? body.wallet.trim() : "";
     if (!isValidStellarAddress(wallet)) throw new Error("Invalid Stellar address.");
-    if (!stellarReady) throw new Error("Stellar testnet is unreachable right now — try again in a moment.");
+    if (!(await ensureStellarReady())) throw new Error("Stellar is unreachable right now — try again in a moment.");
     let account;
     try {
       account = await stellarServer.loadAccount(wallet);
     } catch {
+      if (IS_MAINNET) {
+        throw new Error(`${wallet} doesn't exist on Stellar mainnet yet — fund it with at least ~1.5 XLM (base reserve plus the trustline's), then try again.`);
+      }
       await stellarServer.friendbot(wallet).call();
       account = await stellarServer.loadAccount(wallet);
     }
-    const stellarAsset = new StellarAsset(DEMO_ASSET_CODE, issuer.publicKey());
-    const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: Networks.TESTNET }).addOperation(Operation.changeTrust({ asset: stellarAsset })).setTimeout(60).build();
-    return { xdr: tx.toXDR(), networkPassphrase: Networks.TESTNET };
+    const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: NETWORK_PASSPHRASE }).addOperation(Operation.changeTrust({ asset: SETTLEMENT_ASSET })).setTimeout(60).build();
+    return { xdr: tx.toXDR(), networkPassphrase: NETWORK_PASSPHRASE };
   },
 
-  /** Submits a client-signed `changeTrust` XDR (from `trustlineTransaction`) to Stellar testnet. */
+  /** Submits a client-signed `changeTrust` XDR (from `trustlineTransaction`) to the configured Stellar network. */
   async submitTrustline(body) {
     const xdr = typeof body.xdr === "string" ? body.xdr : "";
     if (!xdr) throw new Error("Missing signed transaction.");
-    const tx = TransactionBuilder.fromXDR(xdr, Networks.TESTNET);
+    const tx = TransactionBuilder.fromXDR(xdr, NETWORK_PASSPHRASE);
     const result = await stellarServer.submitTransaction(tx);
     return { txHash: result.hash };
   },
@@ -1094,15 +1353,47 @@ const actions: Record<string, Action> = {
   },
 
   /**
-   * Pure read for the "Real" confirmation mode's 5s poll — unlike `confirm`/
-   * `sellConfirm`, this never forces a payment or crypto-received event, it
-   * only reports whatever the order's current status already is. A real
-   * integration would land the same state via its webhook handler updating
-   * the order store; polling this is how the page notices without one.
+   * The "Real" confirmation mode's 5s poll. Never forces a payment or
+   * crypto-received event — it reports the order's real state and nothing
+   * else. A production integration would land that state purely from its
+   * webhook handler.
+   *
+   * This demo can't rely on the webhook alone: it only arrives if
+   * `PUBLIC_BASE_URL` currently tunnels to this machine, and a tunnel that's
+   * down or stale leaves a genuinely-paid order stuck on "pending" forever
+   * with nothing on screen to explain it. So for a real (non-mock) provider
+   * whose order hasn't landed yet, this also reads the charge straight from
+   * the provider API — the same read `confirm` does, and just as unable to
+   * invent an approval: an unpaid charge stays pending either way. Whichever
+   * path sees the payment first wins; `finalizeOrder`/`handleWebhook` both
+   * no-op on an order that's already past "pending".
    */
   async status(body) {
-    const order = await ramp.getOrder(body.orderId);
+    let order = await ramp.getOrder(body.orderId);
     if (!order) throw new Error("Order not found.");
+
+    if (order.status === "created" && order.charge && !isMockBacked(order.provider)) {
+      let approved = false;
+      try {
+        approved = (await readRealChargeState(order))?.status === "approved";
+      } catch (error) {
+        // Provider unreachable / charge not queryable — stay quiet on the
+        // wire and let the next tick (or the webhook) try again.
+        console.error(`status poll [${order.provider}] could not read the charge:`, (error as Error).message ?? error);
+      }
+      if (approved) {
+        console.log(`status poll [${order.provider}]: order ${order.id} is paid — settling (webhook did not get there first)`);
+        // Settlement failures surface below via `settlementFailures` rather
+        // than bubbling out of the poll as a generic error.
+        order = await finalizeOrder(order).catch(() => order!);
+      }
+    }
+
+    // Paid but undelivered — the one state the buyer must not be left
+    // guessing about, since their money is already gone.
+    const settlementError = settlementFailures.get(order.id);
+    if (settlementError) return { done: true, failed: true, message: settlementError };
+
     if (order.status === "completed") return { done: true, resultHtml: renderReceipt(order) };
     if (order.status === "failed" || order.status === "expired" || order.status === "canceled") {
       return { done: true, failed: true };
@@ -1210,9 +1501,18 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     let raw = "";
     req.on("data", (chunk) => (raw += chunk));
     req.on("end", async () => {
+      // Log what arrived before handling it. Mercado Pago sends several
+      // notification shapes (Webhooks v2 `type`+`data.id`, IPN
+      // `topic`+`id`, merchant_order) and an unexpected outcome is almost
+      // impossible to diagnose from the outcome alone.
+      const query = url.search || "(no query)";
+      console.log(`webhook [${providerName}] ← ${query} signed=${req.headers["x-signature"] ? "yes" : "NO"} body=${raw.slice(0, 200) || "(empty)"}`);
       try {
         const result = await ramp.handleWebhook(providerName, { body: raw, headers: req.headers, url: req.url });
-        console.log(`webhook [${providerName}]: ${result.outcome}`);
+        console.log(`webhook [${providerName}]: ${result.outcome}${result.orderId ? ` (order ${result.orderId})` : ""}`);
+        if (result.outcome === "invalid_signature") {
+          console.warn(`  ↳ x-signature didn't match. Check MP_${providerName.endsWith("-br") ? "BR" : "AR"}_WEBHOOK_SECRET in .env.${DEMO_ENV} against the app's Webhooks panel.`);
+        }
         res.writeHead(result.status).end();
       } catch (error) {
         console.error(`webhook [${providerName}] error:`, error);
@@ -1563,7 +1863,10 @@ const PAGE = /* html */ `<!doctype html>
       stopPolling();
       pendingKind = null;
       if (data.failed) {
-        showToast(STR('genericError'), 'error');
+        // data.message carries a settlement failure — the buyer paid and the
+        // crypto did NOT go out. Keep the order view on screen (its id is
+        // what a retry needs) instead of clearing it like a plain failure.
+        showToast(data.message || STR('genericError'), 'error');
         swapView('actions', '');
         return;
       }
@@ -1596,10 +1899,51 @@ const PAGE = /* html */ `<!doctype html>
     var current = el.firstElementChild;
     if (current) {
       current.classList.add('leaving');
-      setTimeout(function () { el.innerHTML = html; }, 150);
+      setTimeout(function () { el.innerHTML = html; wirePaymentLink(el); }, 150);
     } else {
       el.innerHTML = html;
+      wirePaymentLink(el);
     }
+  }
+
+  /**
+   * ReceivePayment locks its payment-link button after one click, but that
+   * lock is React state and this page renders the component to static markup
+   * with no hydration — so the same behavior is re-applied here over the
+   * data- attributes the component emits. Opening a hosted checkout over and
+   * over just leaves a pile of tabs racing on one charge; the button comes
+   * back after the lock window in case the buyer closed the tab or the
+   * payment bounced.
+   */
+  function wirePaymentLink(root) {
+    var link = root && root.querySelector('[data-cosmos-payment-link]');
+    if (!link || link.dataset.lockWired) return;
+    link.dataset.lockWired = '1';
+    var lockMs = Number(link.dataset.lockMs || 0);
+    if (!(lockMs > 0)) return;
+
+    var openLabel = link.textContent;
+    var lockedLabel = link.dataset.lockedLabel || openLabel;
+    var open = { background: link.style.background, color: link.style.color, cursor: link.style.cursor };
+
+    link.addEventListener('click', function (event) {
+      if (link.getAttribute('aria-disabled') === 'true') { event.preventDefault(); return; }
+      link.setAttribute('aria-disabled', 'true');
+      link.style.pointerEvents = 'none';
+      link.style.background = 'var(--cosmos-surface-alt, #F3F4F6)';
+      link.style.color = 'var(--cosmos-muted, #9CA3AF)';
+      link.style.cursor = 'default';
+      link.textContent = lockedLabel;
+      setTimeout(function () {
+        if (!link.isConnected) return; // order completed — this view is gone
+        link.removeAttribute('aria-disabled');
+        link.style.pointerEvents = '';
+        link.style.background = open.background;
+        link.style.color = open.color;
+        link.style.cursor = open.cursor;
+        link.textContent = openLabel;
+      }, lockMs);
+    });
   }
 
   async function fetchStep() {
@@ -1821,9 +2165,10 @@ const PAGE = /* html */ `<!doctype html>
       }
     } catch (err) {
       setButtonLoading(btn, false);
-      // Couldn't check — let it through; settlement itself falls back to a
-      // simulated tx id if the trustline really is missing.
-      proceedPastWallet();
+      // Couldn't check. Don't wave it through: an unverified trustline is
+      // exactly the case where the buyer pays and the USDC can't be
+      // delivered. Checkout re-checks server-side and would refuse anyway.
+      showToast(STR('trustlineCheckFailed'), 'error');
       return;
     }
     openTrustlineModal();
@@ -1838,7 +2183,11 @@ const PAGE = /* html */ `<!doctype html>
       '<p>' + STR(isKit ? 'trustlineBodyKit' : 'trustlineBodyManual') + '</p>' +
       '<div id="trustline-status"></div>' +
       (isKit ? '<button type="button" class="primary" id="trustlineEnableBtn" onclick="enableTrustline()">' + STR('trustlineEnable') + '</button>' : '') +
-      '<button type="button" class="secondary" onclick="closeTrustlineModal(true)">' + STR('trustlineContinueAnyway') + '</button>';
+      // No "continue anyway": without the trustline the asset cannot be
+      // delivered, and checkout refuses the order anyway
+      // (assertWalletCanReceive). Offering it would only lead somewhere that
+      // dead-ends, or — before that gate existed — to paying for nothing.
+      '<button type="button" class="secondary" onclick="closeTrustlineModal(false)">' + STR('trustlineBack') + '</button>';
     document.getElementById('trustline-backdrop').classList.add('open');
   }
 

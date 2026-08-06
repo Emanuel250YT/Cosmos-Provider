@@ -350,6 +350,82 @@ describe("MercadoPagoProvider webhooks", () => {
     });
     expect(ignored).toBeNull();
   });
+
+  // IPN is what a `notification_url` set on a Checkout Pro preference
+  // actually receives — no `data.id` anywhere, so the v2-only parsing used to
+  // drop every payment on that rail.
+  it("parses IPN payment notifications (topic/id, no data.id)", async () => {
+    const { fetchImpl } = createMockFetch([]);
+    const mp = provider(fetchImpl);
+
+    const fromQuery = await mp.parseWebhook({
+      body: JSON.stringify({ resource: "https://api.mercadolibre.com/v1/payments/424242", topic: "payment" }),
+      headers: {},
+      url: "/webhooks/mercadopago-ar?topic=payment&id=424242",
+    });
+    expect(fromQuery).toMatchObject({ chargeId: "424242", kind: "payment" });
+
+    // Same notification with an empty query string — the id has to come out
+    // of the `resource` URL in the body instead.
+    const fromResource = await mp.parseWebhook({
+      body: JSON.stringify({ resource: "https://api.mercadolibre.com/v1/payments/515151", topic: "payment" }),
+      headers: {},
+    });
+    expect(fromResource).toMatchObject({ chargeId: "515151", kind: "payment" });
+  });
+
+  it("signs IPN notifications over the same id it parses", async () => {
+    const { fetchImpl } = createMockFetch([]);
+    const mp = provider(fetchImpl, { webhookSecret: SECRET });
+
+    const ts = "1700000000";
+    const requestId = "ipn-req-1";
+    const v1 = createHmac("sha256", SECRET).update(`id:424242;request-id:${requestId};ts:${ts};`).digest("hex");
+    const request = {
+      body: JSON.stringify({ resource: "https://api.mercadolibre.com/v1/payments/424242", topic: "payment" }),
+      headers: { "x-signature": `ts=${ts},v1=${v1}`, "x-request-id": requestId },
+      url: "/webhooks/mercadopago-ar?topic=payment&id=424242",
+    };
+
+    expect(await mp.verifyWebhook(request)).toBe(true);
+    expect(await mp.parseWebhook(request)).toMatchObject({ chargeId: "424242" });
+  });
+
+  it("resolves merchant_order notifications to the approved payment", async () => {
+    const { fetchImpl, requests } = createMockFetch([
+      {
+        route: "GET /merchant_orders/9001",
+        response: {
+          payments: [
+            { id: 111, status: "rejected" },
+            { id: 222, status: "approved" },
+          ],
+        },
+      },
+    ]);
+    const mp = provider(fetchImpl);
+
+    const notification = await mp.parseWebhook({
+      body: JSON.stringify({ resource: "https://api.mercadolibre.com/merchant_orders/9001", topic: "merchant_order" }),
+      headers: {},
+      url: "/webhooks/mercadopago-ar?topic=merchant_order&id=9001",
+    });
+
+    expect(notification).toMatchObject({ chargeId: "222", kind: "payment" });
+    expect(requests[0]!.url).toContain("/merchant_orders/9001");
+  });
+
+  it("ignores a merchant_order with no payments yet", async () => {
+    const { fetchImpl } = createMockFetch([{ route: "GET /merchant_orders/9002", response: { payments: [] } }]);
+    const mp = provider(fetchImpl);
+
+    const notification = await mp.parseWebhook({
+      body: JSON.stringify({ topic: "merchant_order" }),
+      headers: {},
+      url: "/webhooks/mercadopago-ar?topic=merchant_order&id=9002",
+    });
+    expect(notification).toBeNull();
+  });
 });
 
 describe("WebhookEmitter", () => {

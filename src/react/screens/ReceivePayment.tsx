@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { QRCode, type QRCodeProps } from "../primitives/QRCode";
 import { DetailRow, type DetailRowProps } from "../primitives/DetailRow";
 import { screenCardStyle } from "./shared";
@@ -23,6 +26,19 @@ export interface ReceivePaymentProps {
   /** Shown instead of (or alongside) the QR for hosted-checkout charges. */
   paymentLink?: string;
   paymentLinkLabel?: string;
+  /**
+   * Label the payment-link button switches to once it has been opened. See
+   * {@link paymentLinkLockMs}.
+   */
+  paymentLinkOpenedLabel?: string;
+  /**
+   * How long the payment-link button stays disabled after it's clicked, in
+   * ms (default 30s; `0` disables the lock). Opening a hosted checkout
+   * several times over leaves the buyer with a pile of tabs racing on the
+   * same charge, so the button locks itself for one checkout attempt and
+   * then comes back in case they closed the tab or the payment bounced.
+   */
+  paymentLinkLockMs?: number;
   /** Extra detail rows below the QR — order id, expiry, method... */
   rows?: DetailRowProps[];
   onCopyCode?: () => void;
@@ -41,6 +57,8 @@ export function ReceivePayment({
   qrIsPaymentLink = false,
   paymentLink,
   paymentLinkLabel = t(locale, "openPaymentLink"),
+  paymentLinkOpenedLabel = t(locale, "paymentLinkOpened"),
+  paymentLinkLockMs = 30_000,
   rows,
   onCopyCode,
   copyLabel = t(locale, "copyCode"),
@@ -49,6 +67,17 @@ export function ReceivePayment({
   const effectiveQr = qr ?? autoLinkQr;
   const isLinkQr = qrIsPaymentLink || (!qr && !!autoLinkQr);
   const resolvedTitle = title ?? t(locale, "scanToPay");
+
+  // One checkout attempt at a time — see `paymentLinkLockMs`. Only takes
+  // effect once hydrated; a statically rendered page always ships the link
+  // unlocked, and the `data-cosmos-payment-link` attribute below is the hook
+  // for wiring the same behavior there.
+  const [linkLocked, setLinkLocked] = useState(false);
+  useEffect(() => {
+    if (!linkLocked || paymentLinkLockMs <= 0) return;
+    const timer = setTimeout(() => setLinkLocked(false), paymentLinkLockMs);
+    return () => clearTimeout(timer);
+  }, [linkLocked, paymentLinkLockMs]);
 
   return (
     <div style={{ ...screenCardStyle, fontFamily: "Helvetica, Arial, sans-serif", background: "var(--cosmos-panel, #fff)", borderRadius: 24, padding: 20, color: "var(--cosmos-fg, #111827)" }}>
@@ -92,22 +121,35 @@ export function ReceivePayment({
           href={paymentLink}
           target="_blank"
           rel="noopener noreferrer"
+          data-cosmos-payment-link=""
+          data-locked-label={paymentLinkOpenedLabel}
+          data-lock-ms={paymentLinkLockMs}
+          aria-disabled={linkLocked || undefined}
+          onClick={(event) => {
+            if (linkLocked) {
+              event.preventDefault();
+              return;
+            }
+            if (paymentLinkLockMs > 0) setLinkLocked(true);
+          }}
           style={{
             display: "block",
             textAlign: "center",
             width: "100%",
             boxSizing: "border-box",
-            background: "var(--cosmos-button-bg, #111827)",
-            color: "var(--cosmos-button-fg, #fff)",
+            background: linkLocked ? "var(--cosmos-surface-alt, #F3F4F6)" : "var(--cosmos-button-bg, #111827)",
+            color: linkLocked ? "var(--cosmos-muted, #9CA3AF)" : "var(--cosmos-button-fg, #fff)",
             borderRadius: 16,
             padding: 16,
             fontSize: 15,
             fontWeight: 700,
             marginTop: 20,
             textDecoration: "none",
+            cursor: linkLocked ? "default" : "pointer",
+            pointerEvents: linkLocked ? "none" : undefined,
           }}
         >
-          {paymentLinkLabel}
+          {linkLocked ? paymentLinkOpenedLabel : paymentLinkLabel}
         </a>
       ) : null}
 

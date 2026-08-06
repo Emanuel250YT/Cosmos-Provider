@@ -430,23 +430,9 @@ export class MercadoPagoProvider implements PaymentProvider {
     let lastError: unknown;
     for (const account of accounts) {
       try {
-        const payment = await this.#request<{
-          id: number;
-          status?: string;
-          transaction_amount?: number;
-          currency_id?: string;
-          external_reference?: string;
-          metadata?: { external_reference?: string };
-        }>(account, "GET", `/v1/payments/${chargeId}`);
-
-        return {
-          id: String(payment.id),
-          status: STATUS_MAP[payment.status ?? ""] ?? "pending",
-          amount: payment.transaction_amount ?? 0,
-          currency: (payment.currency_id ?? "").toUpperCase(),
-          reference: payment.external_reference ?? payment.metadata?.external_reference,
-          raw: payment,
-        };
+        return toChargeState(
+          await this.#request<MercadoPagoPaymentPayload>(account, "GET", `/v1/payments/${chargeId}`),
+        );
       } catch (error) {
         lastError = error;
         // 404 just means "not this account" — keep trying the others.
@@ -455,6 +441,44 @@ export class MercadoPagoProvider implements PaymentProvider {
       }
     }
     throw lastError ?? new ProviderError(this.name, "No account configured to fetch charges with.");
+  }
+
+  /**
+   * Find the payment made against an `external_reference`.
+   *
+   * This is the ONLY way to check the outcome of a Checkout Pro link
+   * ({@link createPaymentLink}): its `Charge.id` is a *preference* id, and
+   * `/v1/payments/<preferenceId>` doesn't exist — passing one to
+   * {@link getCharge} always 404s, however genuinely the buyer paid. The
+   * payment MP creates when they do carries the preference's
+   * `external_reference`, so that's what identifies it.
+   *
+   * Returns the approved payment when there is one (a buyer who retries after
+   * a rejection leaves several against the same reference), else the most
+   * recent, else `null` when nobody has paid yet.
+   */
+  async findChargeByReference(reference: string): Promise<ChargeState | null> {
+    const query = `?external_reference=${encodeURIComponent(reference)}&sort=date_created&criteria=desc`;
+    let lastError: unknown;
+    for (const account of this.#allAccounts()) {
+      try {
+        const found = await this.#request<{ results?: MercadoPagoPaymentPayload[] }>(
+          account,
+          "GET",
+          `/v1/payments/search${query}`,
+        );
+        const results = found.results ?? [];
+        if (results.length === 0) continue;
+        const payment = results.find((p) => p.status === "approved") ?? results[0]!;
+        return toChargeState(payment);
+      } catch (error) {
+        lastError = error;
+        if (error instanceof ProviderError && error.status === 404) continue;
+        throw error;
+      }
+    }
+    if (lastError && !(lastError instanceof ProviderError && lastError.status === 404)) throw lastError;
+    return null;
   }
 
   // -------------------------------------------------------------------------
@@ -470,6 +494,11 @@ export class MercadoPagoProvider implements PaymentProvider {
    * every configured account's `webhookSecret` and accepts if any one
    * matches. Safe — an HMAC signature only ever validates against the exact
    * secret that produced it.
+   *
+   * The signed id is whatever the notification used to name its resource, so
+   * this follows {@link parseWebhook} across both formats: `data.id` for
+   * Webhooks v2, the bare `id` query param for IPN. Signing the v2 id alone
+   * would reject every IPN notification as forged.
    */
   async verifyWebhook(request: WebhookRequest): Promise<boolean> {
     const secrets = this.#allAccounts()
@@ -505,17 +534,42 @@ export class MercadoPagoProvider implements PaymentProvider {
     return false;
   }
 
+  /**
+   * Mercado Pago has TWO notification formats and a `notification_url` set on
+   * a Checkout Pro preference receives the older one, so both are handled:
+   *
+   * - Webhooks v2 — `?data.id=<paymentId>&type=payment`, body
+   *   `{type:"payment", action:"payment.updated", data:{id}}`.
+   * - IPN — `?topic=payment&id=<paymentId>`, body `{topic, resource}` with
+   *   no `data.id` anywhere. Preference-based checkouts (`createPaymentLink`)
+   *   are notified this way, so treating it as unparseable silently drops
+   *   every real payment on that rail.
+   *
+   * IPN also emits `topic=merchant_order`, which carries the payments for a
+   * preference rather than a payment id — resolved through the merchant order
+   * to the payment that actually went through. `handleWebhook` re-fetches
+   * whatever id comes out of here from the API before trusting it, so this
+   * only has to identify the payment, not vouch for its state.
+   */
   async parseWebhook(request: WebhookRequest): Promise<WebhookNotification | null> {
     const body = parseBody(request.body);
-    const kind =
-      (typeof body.type === "string" && body.type) ||
-      (typeof body.action === "string" && body.action.split(".")[0]) ||
-      "unknown";
+    const topic = this.#webhookTopic(request, body);
 
-    const paymentId = this.#extractPaymentId(request);
-    if (kind !== "payment" || !paymentId) return null;
+    if (topic === "payment") {
+      const paymentId = this.#extractPaymentId(request);
+      if (!paymentId) return null;
+      return { chargeId: String(paymentId), kind: "payment", raw: body };
+    }
 
-    return { chargeId: String(paymentId), kind, raw: body };
+    if (topic === "merchant_order") {
+      const merchantOrderId = this.#extractResourceId(request, body);
+      if (!merchantOrderId) return null;
+      const paymentId = await this.#paymentIdFromMerchantOrder(merchantOrderId);
+      if (!paymentId) return null;
+      return { chargeId: paymentId, kind: "payment", raw: body };
+    }
+
+    return null;
   }
 
   /**
@@ -559,12 +613,68 @@ export class MercadoPagoProvider implements PaymentProvider {
     };
   }
 
+  /** What this notification is about, across both formats: `type`/`action` (Webhooks v2, body or query) or `topic` (IPN, query or body). */
+  #webhookTopic(request: WebhookRequest, body: Record<string, unknown>): string {
+    const fromBody =
+      (typeof body.type === "string" && body.type) ||
+      (typeof body.action === "string" && body.action.split(".")[0]) ||
+      (typeof body.topic === "string" && body.topic) ||
+      "";
+    if (fromBody) return fromBody;
+    return queryParam(request, "type") ?? queryParam(request, "topic") ?? "unknown";
+  }
+
+  /**
+   * The payment id, in whichever place the notification put it: `data.id`
+   * (Webhooks v2, query then body) or the bare `id` query param (IPN). The
+   * IPN `id` is only read once the topic says "payment" — for other topics
+   * it identifies a different resource entirely.
+   */
   #extractPaymentId(request: WebhookRequest): string | undefined {
     const fromQuery = request.query?.["data.id"] ?? queryFromUrl(request.url, "data.id");
     if (fromQuery) return fromQuery;
     const body = parseBody(request.body);
     const data = body.data as { id?: string | number } | undefined;
-    return data?.id !== undefined ? String(data.id) : undefined;
+    if (data?.id !== undefined) return String(data.id);
+    return this.#extractResourceId(request, body);
+  }
+
+  /** IPN's resource id: the `id` query param, or the trailing id of the `resource` URL in the body. */
+  #extractResourceId(request: WebhookRequest, body: Record<string, unknown>): string | undefined {
+    const fromQuery = queryParam(request, "id");
+    if (fromQuery) return fromQuery;
+    if (typeof body.resource === "string") {
+      const tail = body.resource.split("?")[0]!.split("/").filter(Boolean).pop();
+      if (tail && /^\d+$/.test(tail)) return tail;
+    }
+    return undefined;
+  }
+
+  /**
+   * Resolve a merchant order to the payment worth acting on: the approved one
+   * if there is one, else the most recent. Returns undefined when the order
+   * has no payments yet (the notification that fires as the buyer merely
+   * opens the checkout), which `parseWebhook` reports as "nothing to do".
+   */
+  async #paymentIdFromMerchantOrder(merchantOrderId: string): Promise<string | undefined> {
+    for (const account of this.#allAccounts()) {
+      try {
+        const order = await this.#request<{ payments?: Array<{ id?: number | string; status?: string }> }>(
+          account,
+          "GET",
+          `/merchant_orders/${merchantOrderId}`,
+        );
+        const payments = order.payments ?? [];
+        if (payments.length === 0) return undefined;
+        const chosen = payments.find((p) => p.status === "approved") ?? payments[payments.length - 1]!;
+        return chosen.id !== undefined ? String(chosen.id) : undefined;
+      } catch (error) {
+        // 404 just means "not this account" — same per-account probing as getCharge.
+        if (error instanceof ProviderError && error.status === 404) continue;
+        throw error;
+      }
+    }
+    return undefined;
   }
 
   // -------------------------------------------------------------------------
@@ -687,6 +797,32 @@ function parseBody(body: string | Record<string, unknown>): Record<string, unkno
   } catch {
     return {};
   }
+}
+
+/** The fields of a `/v1/payments` payload this provider reads — the same shape whether it came from a fetch by id or from a search. */
+interface MercadoPagoPaymentPayload {
+  id: number | string;
+  status?: string;
+  transaction_amount?: number;
+  currency_id?: string;
+  external_reference?: string;
+  metadata?: { external_reference?: string };
+}
+
+function toChargeState(payment: MercadoPagoPaymentPayload): ChargeState {
+  return {
+    id: String(payment.id),
+    status: STATUS_MAP[payment.status ?? ""] ?? "pending",
+    amount: payment.transaction_amount ?? 0,
+    currency: (payment.currency_id ?? "").toUpperCase(),
+    reference: payment.external_reference ?? payment.metadata?.external_reference,
+    raw: payment,
+  };
+}
+
+/** A query param from either the parsed `query` map or the raw `url`. */
+function queryParam(request: WebhookRequest, key: string): string | undefined {
+  return request.query?.[key] ?? queryFromUrl(request.url, key);
 }
 
 function queryFromUrl(url: string | undefined, key: string): string | undefined {
