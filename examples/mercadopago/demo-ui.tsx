@@ -31,13 +31,24 @@
  *     preferences with your real account. Documented in
  *     `.env.production.example`. Know what you're testing against.
  * Each Mercado Pago account uses its real `MP_*_ACCESS_TOKEN` when the
- * loaded file sets one, and only falls back to the local, in-memory
- * simulator (`examples/helpers/mock-mercadopago`, safe/deterministic/no
- * external calls) when that env var is absent. Etherfuse always talks to its
- * real sandbox API (no mock exists for it) regardless of `--env`.
+ * loaded file sets one. What happens when it DOESN'T also depends on `--env`
+ * (`REQUIRE_REAL_CREDENTIALS` below):
+ *   - `--env=test` falls back to the local, in-memory simulator
+ *     (`examples/helpers/mock-mercadopago`, safe/deterministic/no external
+ *     calls), so the whole UI stays walkable with an empty `.env.test`.
+ *     Etherfuse is registered keyless too and talks to its real sandbox API.
+ *   - `--env=production` registers NOTHING it has no credentials for: an
+ *     uncredentialed provider is dropped outright instead of being silently
+ *     mocked, so it never reaches the picker (or `/api/*`, or a checkout
+ *     someone could reach by posting its name directly) and a production run
+ *     can't hand anyone a faked payment. Etherfuse needs `ETHERFUSE_API_KEY`
+ *     on the same terms — it stays `environment: "sandbox"` either way, this
+ *     demo has no production mode for it. Startup aborts if that leaves zero
+ *     providers.
  * `mockBackedProviders` tracks which provider names are on the local
  * simulator, so `confirmOrder` knows whether it's safe to fake a payment
- * (mock) or must genuinely check status (sandbox or real).
+ * (mock) or must genuinely check status (sandbox or real). It's always empty
+ * in production mode.
  *
  * Once an order is created, the page polls `/api/status` (a pure read —
  * no side effects) every 5s waiting for it to land as `completed`, same as
@@ -104,6 +115,17 @@ if (envResult.error) {
 }
 /** Whether Mercado Pago runs in sandbox mode — ALWAYS true in test mode, regardless of `.env.test`'s content; only production mode reads `MP_SANDBOX` (default true — must be explicitly set to "false" to place real charges). See buildMercadoPago below. */
 const MP_SANDBOX = DEMO_ENV === "test" ? true : (process.env.MP_SANDBOX ?? "true") !== "false";
+
+/**
+ * Production refuses to register a provider it has no API key for, instead
+ * of quietly substituting the local simulator the way test mode does — see
+ * the `--env` section of this file's top docstring. Keeps the picker honest:
+ * whatever is listed in production is backed by a real account.
+ */
+const REQUIRE_REAL_CREDENTIALS = DEMO_ENV === "production";
+
+/** Provider names left unregistered for lack of credentials, for the startup log. */
+const skippedProviders: string[] = [];
 
 // Production defaults to a different port than test so both can run at the
 // same time (e.g. comparing sandbox vs. real behavior side by side) — override
@@ -560,13 +582,21 @@ function stellarExpertTxUrl(txId: string): string | undefined {
 // Etherfuse settles both Brazil (PIX/BRL) and Mexico (SPEI/MXN), so both
 // currencies show up in the picker and both build a real charge — BRL
 // delivers Asset.TESOURO, MXN delivers Asset.CETES (see EtherfuseProvider's docstring).
-const etherfuseProvider = new EtherfuseProvider({
-  apiKey: process.env.ETHERFUSE_API_KEY ?? "",
-  environment: "sandbox",
-  regions: ["BR", "MX"],
-  currencies: [FiatCurrency.BRL, FiatCurrency.MXN],
-  logoUrl: "/assets/logo/etherfuse.ico",
-});
+// No mock exists for it, so without ETHERFUSE_API_KEY it can only fail at
+// checkout: test mode registers it anyway (the failure is informative there),
+// production drops it entirely (`REQUIRE_REAL_CREDENTIALS`) — hence nullable.
+const ETHERFUSE_API_KEY = process.env.ETHERFUSE_API_KEY?.trim() ?? "";
+const etherfuseProvider =
+  REQUIRE_REAL_CREDENTIALS && !ETHERFUSE_API_KEY
+    ? null
+    : new EtherfuseProvider({
+        apiKey: ETHERFUSE_API_KEY,
+        environment: "sandbox",
+        regions: ["BR", "MX"],
+        currencies: [FiatCurrency.BRL, FiatCurrency.MXN],
+        logoUrl: "/assets/logo/etherfuse.ico",
+      });
+if (!etherfuseProvider) skippedProviders.push("etherfuse (no ETHERFUSE_API_KEY)");
 
 const oracle = () => new CoinGeckoOracle({ apiKey: process.env.COINGECKO_API_KEY });
 
@@ -585,24 +615,37 @@ const mockBackedProviders = new Set<string>();
 
 /**
  * A Mercado Pago account: real credentials from the loaded .env file when
- * set, else the local simulator (fake payments allowed — tracked in
- * `mockBackedProviders`). `sandbox` comes from `MP_SANDBOX` (see the top of
- * this file) — ALWAYS `true` in test mode (`--env=test`) no matter what,
- * only production mode can flip it to `false` and place a real charge.
+ * set. Without a token, test mode falls back to the local simulator (fake
+ * payments allowed — tracked in `mockBackedProviders`) while production
+ * returns `null` so the account is never registered at all
+ * (`REQUIRE_REAL_CREDENTIALS`). `sandbox` comes from `MP_SANDBOX` (see the
+ * top of this file) — ALWAYS `true` in test mode (`--env=test`) no matter
+ * what, only production mode can flip it to `false` and place a real charge.
+ *
+ * A real account also gets `notificationUrl` — that's what makes its inbound
+ * webhooks land on `/webhooks/<name>` (see the route near the bottom), the
+ * only way a genuine payment ever completes an order here: nothing about the
+ * real path is faked, so without that URL reaching this process the order
+ * just sits pending. It must be a public tunnel to this machine, per
+ * `PUBLIC_BASE_URL`.
  */
-function buildMercadoPago(name: string, region: string, currency: FiatCurrency, envToken: string | undefined, envWebhookSecret: string | undefined): MercadoPagoProvider {
-  if (envToken) {
+function buildMercadoPago(name: string, region: string, currency: FiatCurrency, envToken: string | undefined, envWebhookSecret: string | undefined): MercadoPagoProvider | null {
+  if (envToken?.trim()) {
     return new MercadoPagoProvider({
       name,
       regions: [region],
       currencies: [currency],
-      accessToken: envToken,
+      accessToken: envToken.trim(),
       sandbox: MP_SANDBOX,
       webhookSecret: envWebhookSecret,
       notificationUrl: `${PUBLIC_BASE_URL}/webhooks/${name}`,
       defaultPayerEmail: "buyer@example.com",
       logoUrl: "/assets/logo/mp.svg",
     });
+  }
+  if (REQUIRE_REAL_CREDENTIALS) {
+    skippedProviders.push(`${name} (no ${region === "BR" ? "MP_BR_ACCESS_TOKEN" : "MP_AR_ACCESS_TOKEN"})`);
+    return null;
   }
   mockBackedProviders.add(name);
   return new MercadoPagoProvider({
@@ -620,8 +663,20 @@ function buildMercadoPago(name: string, region: string, currency: FiatCurrency, 
 const mercadoPagoBr = buildMercadoPago("mercadopago-br", "BR", FiatCurrency.BRL, process.env.MP_BR_ACCESS_TOKEN, process.env.MP_BR_WEBHOOK_SECRET);
 const mercadoPagoAr = buildMercadoPago("mercadopago-ar", "AR", FiatCurrency.ARS, process.env.MP_AR_ACCESS_TOKEN, process.env.MP_AR_WEBHOOK_SECRET);
 
+/** Everything that ended up with usable credentials — the picker, `/api/*` and the webhook routes all derive from this and nothing else. */
+const activeProviders: PaymentProvider[] = [etherfuseProvider, mercadoPagoBr, mercadoPagoAr].filter((p): p is NonNullable<typeof p> => p !== null);
+
+if (activeProviders.length === 0) {
+  console.error(
+    `✘ No payment provider has credentials in .env.${DEMO_ENV}, and --env=${DEMO_ENV} won't fall back to the local simulator.\n` +
+      `  Set at least one of MP_AR_ACCESS_TOKEN / MP_BR_ACCESS_TOKEN / ETHERFUSE_API_KEY there (see .env.${DEMO_ENV}.example),\n` +
+      `  or run \`npm run demo:ui\` (--env=test) to walk the UI against the local simulator instead.`,
+  );
+  process.exit(1);
+}
+
 const ramp = new CosmosRamp({
-  providers: [etherfuseProvider, mercadoPagoBr, mercadoPagoAr],
+  providers: activeProviders,
   oracle: oracle(),
   settlement: settlementFn,
 });
@@ -634,9 +689,15 @@ function isMockBacked(providerName: string): boolean {
 console.log(
   `Providers: ${ramp.providers.map((p) => (isMockBacked(p.name) ? p.name : `${p.name} (REAL)`)).join(", ")}`,
 );
+if (skippedProviders.length) {
+  console.log(`Not registered (--env=${DEMO_ENV} requires real credentials): ${skippedProviders.join(", ")}`);
+}
 console.log(`Mercado Pago mode: ${MP_SANDBOX ? "sandbox — no real charges possible" : "⚠ PRODUCTION — real, chargeable preferences"}`);
-for (const name of [mercadoPagoBr.name, mercadoPagoAr.name]) {
-  if (!isMockBacked(name)) console.log(`Webhook notification URL for ${name}: ${PUBLIC_BASE_URL}/webhooks/${name}`);
+// Every credentialed Mercado Pago account POSTs here on each payment update.
+// This has to be publicly reachable (PUBLIC_BASE_URL) or those orders never
+// leave "pending" — see the /webhooks/ route.
+for (const provider of [mercadoPagoBr, mercadoPagoAr]) {
+  if (provider && !isMockBacked(provider.name)) console.log(`Webhook notification URL for ${provider.name}: ${PUBLIC_BASE_URL}/webhooks/${provider.name}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -671,7 +732,14 @@ function wizardShell(op: Op, lang: Lang, stepName: string, bodyHtml: string): st
 }
 
 function renderProviderBody(op: Op, state: WizardState): string {
-  const rows = providersFor(op)
+  const available = providersFor(op);
+  // Only reachable in production, where uncredentialed providers aren't
+  // registered at all — e.g. "sell" when the one credentialed provider is
+  // Etherfuse, which has no payout path.
+  if (available.length === 0) {
+    return `<p style="color:var(--muted);font-size:13px;margin:0">No payment provider in this run supports ${op === "sell" ? "payouts" : "this operation"}.</p>`;
+  }
+  const rows = available
     .map((p) => {
       const card = renderToStaticMarkup(
         <PaymentMethodCard
@@ -916,6 +984,7 @@ async function confirmOrder(orderId: string): Promise<{ resultHtml?: string; pen
   if (!order?.charge) throw new Error("Order not found or has no charge.");
 
   if (order.provider.startsWith("etherfuse")) {
+    if (!etherfuseProvider) throw new Error("Etherfuse is not registered in this run (no ETHERFUSE_API_KEY).");
     await etherfuseProvider.client.sandbox.fiatReceived(order.charge.id);
     const updated = await finalizeOrder(order);
     return { resultHtml: renderReceipt(updated) };
@@ -930,7 +999,12 @@ async function confirmOrder(orderId: string): Promise<{ resultHtml?: string; pen
     return { resultHtml: renderReceipt(updated) };
   }
 
-  await ramp.handleWebhook("mercadopago", mp.pay(order.charge.id));
+  // `order.provider`, not a bare "mercadopago": CosmosRamp keys its registry
+  // by the exact provider name, and each account here is registered under its
+  // own ("mercadopago-ar"/"mercadopago-br"), so anything else is a 404
+  // unknown_provider that silently leaves the order pending.
+  const hook = await ramp.handleWebhook(order.provider, mp.pay(order.charge.id));
+  if (!hook.ok) throw new Error(`Simulated webhook for ${order.provider} was not accepted: ${hook.outcome}`);
   const updated = await ramp.getOrder(orderId);
   if (!updated) throw new Error("Order disappeared after payment.");
   return { resultHtml: renderReceipt(updated) };
@@ -1038,7 +1112,11 @@ const actions: Record<string, Action> = {
 
   /** Creates an offramp order (crypto → fiat) and returns the "waiting for your USDC" view. */
   async sell(body) {
-    const providerName = providersFor("sell").some((p) => p.name === body.provider) ? body.provider : providersFor("sell")[0]!.name;
+    // Can legitimately be empty now: Etherfuse has no payout path, so a
+    // production run credentialed for Etherfuse alone supports no "sell".
+    const sellProviders = providersFor("sell");
+    if (sellProviders.length === 0) throw new Error("No provider in this run supports payouts — selling is unavailable.");
+    const providerName = sellProviders.some((p) => p.name === body.provider) ? body.provider : sellProviders[0]!.name;
     const currency = parseCurrency(body.currency);
     const requested = Number(body.amount);
     const cryptoAmount = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_CRYPTO_AMOUNT;
