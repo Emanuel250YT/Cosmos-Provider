@@ -88,15 +88,19 @@ import {
   CosmosRamp,
   MercadoPagoProvider,
   EtherfuseProvider,
+  AbroadProvider,
+  AbroadKycRequiredError,
+  AbroadQuoteError,
   CoinGeckoOracle,
   FiatCurrency,
+  Country,
   type RampOrderData,
   type QuoteBreakdown,
   type PaymentProvider,
   type SettlementFn,
 } from "../../src/index";
 import { ReceivePayment, PaymentConfirmation, PaymentMethodCard, PaymentOptionRow, SummaryRow } from "../../src/react";
-import { chargeToQrProps, rampOrderToDetailRows, quoteToSummaryRows, renderQrDataUrl } from "../../src/react/server";
+import { chargeToQrProps, rampOrderToDetailRows, offrampDepositToDetailRows, quoteToSummaryRows, renderQrDataUrl } from "../../src/react/server";
 import { createMockMercadoPago } from "../helpers/mock-mercadopago";
 
 // ---------------------------------------------------------------------------
@@ -140,7 +144,7 @@ const WEBHOOK_SECRET = "demo-mp-secret";
 
 type Op = "buy" | "sell" | "quote";
 type Method = "qr" | "link";
-type Currency = "ARS" | "BRL" | "MXN";
+type Currency = "ARS" | "BRL" | "MXN" | "COP";
 type Lang = "en" | "es" | "pt";
 interface WizardState {
   provider: string | null;
@@ -148,18 +152,56 @@ interface WizardState {
   method: Method | null;
   wallet: string | null;
   amount: number | null;
+  /** Sell only: where the fiat is paid out (PIX/BREB key + tax id). */
+  bank: { accountNumber?: string; taxId?: string } | null;
 }
 
-/** Sensible unprompted starting points (~10 USD) — not enforced limits, just a reasonable prefill per currency. */
-const DEFAULT_FIAT_AMOUNT: Record<Currency, number> = { ARS: 2000, BRL: 20, MXN: 300 };
+/** Sensible unprompted starting points (~10-20 USD) — not enforced limits, just a reasonable prefill per currency. */
+const DEFAULT_FIAT_AMOUNT: Record<Currency, number> = { ARS: 2000, BRL: 100, MXN: 300, COP: 60000 };
 const DEFAULT_CRYPTO_AMOUNT = 10;
+/**
+ * The markup this demo charges PER RAIL, on top of the oracle mid rate.
+ *
+ * Different rails really do cost different amounts to run — card-heavy
+ * wallets like Mercado Pago cost more than a direct PIX ramp — so this isn't
+ * one number: it's what makes the picker's fee column worth reading, and why
+ * the cheapest option genuinely differs by region.
+ *
+ * Applied for real, not just displayed: `spreadFor()` feeds every quote,
+ * checkout and sell call, so the figure on the provider card is the figure
+ * the user is charged. Provider-priced rails (Abroad) are the exception —
+ * they quote their own binding all-in price and this can't be added to it,
+ * so those carry an explicit `feeLabel` instead (see where they're
+ * registered).
+ */
+const PROVIDER_FEE: Record<string, number> = {
+  "mercadopago-ar": 0.035,
+  "mercadopago-br": 0.035,
+  etherfuse: 0.02,
+};
+const DEFAULT_FEE = 0.02;
+const spreadFor = (providerName: string | null | undefined): number => (providerName ? (PROVIDER_FEE[providerName] ?? DEFAULT_FEE) : DEFAULT_FEE);
 
-const parseCurrency = (v: unknown): Currency => (v === "ARS" ? "ARS" : v === "MXN" ? "MXN" : "BRL");
-const toFiatCurrency = (c: Currency): FiatCurrency => (c === "ARS" ? FiatCurrency.ARS : c === "MXN" ? FiatCurrency.MXN : FiatCurrency.BRL);
+const parseCurrency = (v: unknown): Currency => (v === "ARS" ? "ARS" : v === "MXN" ? "MXN" : v === "COP" ? "COP" : "BRL");
+const toFiatCurrency = (c: Currency): FiatCurrency =>
+  c === "ARS" ? FiatCurrency.ARS : c === "MXN" ? FiatCurrency.MXN : c === "COP" ? FiatCurrency.COP : FiatCurrency.BRL;
 
+/**
+ * Wizard steps per operation.
+ *
+ * Two of these are conditional and get auto-skipped when they don't apply,
+ * the same way `currency`/`method` already are when a provider offers only
+ * one option (see `selectStep`/`goBack`):
+ * - `bank` — only for a sell on a rail that pays out to the user's own bank
+ *   account and therefore needs its details (Abroad: PIX/BREB key + tax id).
+ * - `kyc` — not listed here at all: identity verification is an EXTRA step
+ *   injected between `amount` and checkout only when the provider says the
+ *   user isn't verified yet, so it never appears for a rail that doesn't ask
+ *   for it. See `renderKycBody` / the `kycStatus` action.
+ */
 const STEPS: Record<Op, string[]> = {
   buy: ["provider", "currency", "method", "wallet", "amount"],
-  sell: ["provider", "currency", "amount"],
+  sell: ["provider", "currency", "amount", "bank"],
   quote: ["provider", "currency", "amount"],
 };
 
@@ -222,8 +264,46 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     trustlineCheckFailed: "Couldn't verify the trustline on this wallet. Try again — checkout stays blocked until we can confirm the USDC can actually be delivered.",
     trustlineChecking: "Checking your wallet…",
     trustlineSuccess: "Trustline enabled — continuing…",
-    trustlineError: "Couldn't enable the trustline. You can try again or continue anyway.",
+    trustlineError: "Couldn't enable the trustline. You can try again.",
     copiedToClipboard: "Copied to clipboard",
+    ars2: "Argentine Pesos (ARS)",
+    cop: "Colombian Pesos (COP)",
+    stepBank: "Payout account",
+    stepKyc: "Verification",
+    bankHint: "Where should we send the money once your USDC arrives? This goes straight to the provider — we never store it.",
+    bankAccountLabel: "PIX key / BREB key",
+    bankAccountPlaceholder: "email, phone, CPF or random key",
+    bankTaxIdLabel: "Tax ID",
+    bankTaxIdPlaceholder: "CPF (Brazil) or NIT/CC (Colombia)",
+    bankRequired: "Enter both the payout key and the tax ID to continue.",
+    kycTitle: "Verify your identity",
+    kycBody: "This provider requires a one-time identity check before it can move funds for you. It's sent straight to the provider — this demo doesn't keep a copy.",
+    kycFullName: "Full name",
+    kycDocumentType: "Document type",
+    kycDocumentNumber: "Document number",
+    kycDateOfBirth: "Date of birth",
+    kycNationality: "Nationality (ISO code)",
+    kycCity: "City",
+    kycAddress: "Address",
+    kycEmail: "Email",
+    kycPhone: "Phone",
+    kycDocument: "Photo of your document",
+    kycSubmit: "Submit verification",
+    kycRequiredFields: "Fill in every field and attach a photo of your document.",
+    kycApproved: "Verified — continuing…",
+    kycRejected: "The provider rejected this verification. Check the details and try again.",
+    kycPending: "Verification submitted — the provider is still reviewing it. Try again shortly.",
+    kycChecking: "Checking your verification status…",
+    depositTitle: "Send your USDC",
+    depositHint: "Send the exact amount to this address. The memo is required — a transfer without it can't be credited.",
+    depositMemoWarning: "Include the memo. Without it the provider can't match your transfer and the funds may be unrecoverable.",
+    quoteBack: "‹ Change amount",
+    quoteProceed: "Continue to payment",
+    quoteExpires: "Quote valid until",
+    feeCaption: "fee",
+    comingSoon: "Coming soon",
+    providerDisabled: "This provider isn't available in this demo yet.",
+    sellUnavailableProd: "Selling is disabled in production mode — this demo can only buy USDC there.",
   },
   es: {
     opBuy: "Comprar USDC",
@@ -283,8 +363,45 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     trustlineCheckFailed: "No pudimos verificar la trustline de esta wallet. Probá de nuevo — el checkout queda bloqueado hasta poder confirmar que el USDC se puede entregar.",
     trustlineChecking: "Verificando tu wallet…",
     trustlineSuccess: "Trustline habilitada — continuando…",
-    trustlineError: "No pudimos habilitar la trustline. Podés reintentar o continuar igual.",
+    trustlineError: "No pudimos habilitar la trustline. Podés reintentar.",
     copiedToClipboard: "Copiado al portapapeles",
+    cop: "Pesos Colombianos (COP)",
+    stepBank: "Cuenta de cobro",
+    stepKyc: "Verificación",
+    bankHint: "¿A dónde te mandamos la plata cuando llegue tu USDC? Va directo al proveedor — nosotros no la guardamos.",
+    bankAccountLabel: "Clave PIX / clave BREB",
+    bankAccountPlaceholder: "email, teléfono, CPF o clave aleatoria",
+    bankTaxIdLabel: "Identificación fiscal",
+    bankTaxIdPlaceholder: "CPF (Brasil) o NIT/CC (Colombia)",
+    bankRequired: "Ingresá la clave de cobro y la identificación fiscal para continuar.",
+    kycTitle: "Verificá tu identidad",
+    kycBody: "Este proveedor pide una verificación de identidad por única vez antes de mover fondos. Se envía directo al proveedor — este demo no guarda una copia.",
+    kycFullName: "Nombre completo",
+    kycDocumentType: "Tipo de documento",
+    kycDocumentNumber: "Número de documento",
+    kycDateOfBirth: "Fecha de nacimiento",
+    kycNationality: "Nacionalidad (código ISO)",
+    kycCity: "Ciudad",
+    kycAddress: "Dirección",
+    kycEmail: "Email",
+    kycPhone: "Teléfono",
+    kycDocument: "Foto de tu documento",
+    kycSubmit: "Enviar verificación",
+    kycRequiredFields: "Completá todos los campos y adjuntá una foto de tu documento.",
+    kycApproved: "Verificado — continuando…",
+    kycRejected: "El proveedor rechazó esta verificación. Revisá los datos y probá de nuevo.",
+    kycPending: "Verificación enviada — el proveedor todavía la está revisando. Probá de nuevo en un momento.",
+    kycChecking: "Verificando tu estado…",
+    depositTitle: "Enviá tu USDC",
+    depositHint: "Enviá el monto exacto a esta dirección. El memo es obligatorio — una transferencia sin memo no se puede acreditar.",
+    depositMemoWarning: "Incluí el memo. Sin él el proveedor no puede identificar tu transferencia y los fondos pueden perderse.",
+    quoteBack: "‹ Cambiar monto",
+    quoteProceed: "Continuar al pago",
+    quoteExpires: "Cotización válida hasta",
+    feeCaption: "recargo",
+    comingSoon: "Próximamente",
+    providerDisabled: "Este proveedor todavía no está disponible en el demo.",
+    sellUnavailableProd: "La venta está deshabilitada en modo producción — acá este demo solo puede comprar USDC.",
   },
   pt: {
     opBuy: "Comprar USDC",
@@ -344,19 +461,128 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     trustlineCheckFailed: "Não conseguimos verificar a trustline desta wallet. Tente de novo — o checkout fica bloqueado até confirmarmos que o USDC pode ser entregue.",
     trustlineChecking: "Verificando sua wallet…",
     trustlineSuccess: "Trustline habilitada — continuando…",
-    trustlineError: "Não conseguimos habilitar a trustline. Você pode tentar de novo ou continuar mesmo assim.",
+    trustlineError: "Não conseguimos habilitar a trustline. Você pode tentar de novo.",
     copiedToClipboard: "Copiado para a área de transferência",
+    cop: "Pesos Colombianos (COP)",
+    stepBank: "Conta de recebimento",
+    stepKyc: "Verificação",
+    bankHint: "Para onde enviamos o dinheiro quando seu USDC chegar? Vai direto para o provedor — não guardamos nada.",
+    bankAccountLabel: "Chave PIX / chave BREB",
+    bankAccountPlaceholder: "e-mail, telefone, CPF ou chave aleatória",
+    bankTaxIdLabel: "CPF / identificação fiscal",
+    bankTaxIdPlaceholder: "CPF (Brasil) ou NIT/CC (Colômbia)",
+    bankRequired: "Informe a chave de recebimento e o CPF para continuar.",
+    kycTitle: "Verifique sua identidade",
+    kycBody: "Este provedor exige uma verificação de identidade única antes de movimentar fundos. É enviada direto ao provedor — este demo não guarda cópia.",
+    kycFullName: "Nome completo",
+    kycDocumentType: "Tipo de documento",
+    kycDocumentNumber: "Número do documento",
+    kycDateOfBirth: "Data de nascimento",
+    kycNationality: "Nacionalidade (código ISO)",
+    kycCity: "Cidade",
+    kycAddress: "Endereço",
+    kycEmail: "E-mail",
+    kycPhone: "Telefone",
+    kycDocument: "Foto do seu documento",
+    kycSubmit: "Enviar verificação",
+    kycRequiredFields: "Preencha todos os campos e anexe uma foto do seu documento.",
+    kycApproved: "Verificado — continuando…",
+    kycRejected: "O provedor recusou esta verificação. Revise os dados e tente novamente.",
+    kycPending: "Verificação enviada — o provedor ainda está analisando. Tente de novo em instantes.",
+    kycChecking: "Verificando seu status…",
+    depositTitle: "Envie seu USDC",
+    depositHint: "Envie o valor exato para este endereço. O memo é obrigatório — uma transferência sem ele não pode ser creditada.",
+    depositMemoWarning: "Inclua o memo. Sem ele o provedor não consegue identificar sua transferência e os fundos podem ser perdidos.",
+    quoteBack: "‹ Alterar valor",
+    quoteProceed: "Continuar para o pagamento",
+    quoteExpires: "Cotação válida até",
+    feeCaption: "taxa",
+    comingSoon: "Em breve",
+    providerDisabled: "Este provedor ainda não está disponível no demo.",
+    sellUnavailableProd: "A venda está desativada no modo produção — aqui este demo só compra USDC.",
   },
 };
 const t = (lang: Lang, key: string): string => STRINGS[lang]?.[key] ?? key;
 
 const PROVIDER_DISPLAY_NAME: Record<string, string> = {
   etherfuse: "Etherfuse",
+  abroad: "Abroad",
   "mercadopago-br": "Mercado Pago Brasil",
   "mercadopago-ar": "Mercado Pago Argentina",
 };
 const providerLabel = (name: string): string => PROVIDER_DISPLAY_NAME[name] ?? name.charAt(0).toUpperCase() + name.slice(1).replace(/[-_]/g, " ");
-const currencyLabelKey = (c: Currency): string => (c === "ARS" ? "ars" : c === "MXN" ? "mxn" : "brl");
+const currencyLabelKey = (c: Currency): string => (c === "ARS" ? "ars" : c === "MXN" ? "mxn" : c === "COP" ? "cop" : "brl");
+
+/**
+ * Rails listed in the picker purely as examples, with no `PaymentProvider`
+ * behind them. They render disabled and can't be selected — a card the user
+ * can click into a dead end would be worse than not showing it at all — but
+ * they make the point that the picker is driven by whatever's registered,
+ * and show where a new logo would land.
+ */
+const DISABLED_PROVIDER_EXAMPLES = [
+  { name: "paypal", title: "PayPal", subtitle: "USD · Global", logoUrl: "/assets/logo/paypal.webp" },
+] as const;
+
+/**
+ * Logo files that are SQUARE, and so should fill their circular badge edge
+ * to edge rather than being inset on a white plate (see
+ * `PaymentMethodCard.logoFills`).
+ *
+ * Keyed by filename because that's where the property actually lives —
+ * checked against the real assets in `src/react/images`: abroad.jpg 200×200,
+ * etherfuse.ico 256×256, paypal.webp 256×256. `mp.svg` is deliberately
+ * absent: it's a 150×104 wordmark, and filling would crop it to an
+ * unreadable middle slice. Add a new logo here only if it's genuinely
+ * square.
+ */
+const SQUARE_LOGO_FILES = new Set(["abroad.jpg", "etherfuse.ico", "paypal.webp"]);
+const logoFillsCircle = (logoUrl?: string): boolean => !!logoUrl && SQUARE_LOGO_FILES.has(logoUrl.split("/").pop()!);
+
+/**
+ * The country each fiat currency is collected in — how a provider's
+ * currencies become the country list on its card.
+ *
+ * Derived from the currency rather than from `provider.regions` on purpose:
+ * `regions` is the union across both directions, but the card is shown for
+ * ONE operation. Abroad settles COP, yet only BUYS in BRL, so a buy card
+ * built from `regions` would advertise Colombia and then refuse it two steps
+ * later. Going through the op-narrowed currencies keeps the two honest.
+ */
+const COUNTRY_FOR_CURRENCY: Record<Currency | string, string> = {
+  ARS: Country.AR,
+  BRL: Country.BR,
+  MXN: Country.MX,
+  COP: Country.CO,
+  CLP: Country.CL,
+  PEN: Country.PE,
+  UYU: Country.UY,
+};
+
+/** Country names for the provider cards, in the demo's three languages. Covers all seven Mercado Pago markets, which is the widest list any provider here can have. */
+const COUNTRY_NAME: Record<Lang, Record<string, string>> = {
+  en: { AR: "Argentina", BR: "Brazil", MX: "Mexico", CL: "Chile", CO: "Colombia", PE: "Peru", UY: "Uruguay" },
+  es: { AR: "Argentina", BR: "Brasil", MX: "México", CL: "Chile", CO: "Colombia", PE: "Perú", UY: "Uruguay" },
+  pt: { AR: "Argentina", BR: "Brasil", MX: "México", CL: "Chile", CO: "Colômbia", PE: "Peru", UY: "Uruguai" },
+};
+
+/**
+ * A provider card's subtitle: what it charges in, and where it works — the
+ * same "USD · Global" shape the PayPal example uses, so every row in the
+ * picker reads the same way.
+ *
+ * Both halves are narrowed to the current operation, so what the card claims
+ * is what that provider can actually do on this screen.
+ */
+function providerSubtitle(provider: PaymentProvider, op: Op, lang: Lang): string {
+  const currencies = currenciesForOp(provider, op);
+  if (!currencies.length) return provider.regions.map((r) => COUNTRY_NAME[lang][r] ?? r).join(", ");
+  const countries = [...new Set(currencies.map((c) => COUNTRY_FOR_CURRENCY[c]).filter(Boolean))].map((c) => COUNTRY_NAME[lang][c!] ?? c!);
+  // Comma within each half, "·" only between them — so a two-currency rail
+  // reads "BRL, MXN · Brasil, México" rather than letting the separator do
+  // double duty and blur where the currencies end.
+  return `${currencies.join(", ")} · ${countries.join(", ")}`;
+}
 const initials = (name: string): string => name.slice(0, 2).toUpperCase();
 const shortenAddress = (address: string): string => (address.length > 12 ? `${address.slice(0, 4)}…${address.slice(-4)}` : address);
 const isValidStellarAddress = (value: string): boolean => /^G[A-Z2-7]{55}$/.test(value);
@@ -367,8 +593,31 @@ const methodsForProvider = (providerName: string, currency: Currency): Method[] 
   // Etherfuse never returns a raw PIX code to render our own QR from — it's
   // always a hosted status-page link (see EtherfuseProvider's docstring).
   if (providerName.startsWith("etherfuse")) return ["link"];
+  // Abroad returns the EMV "copia e cola" payload itself, so the QR is ours
+  // to render and there's no hosted page to link to.
+  if (providerName.startsWith("abroad")) return ["qr"];
   return currency === "BRL" ? ["qr", "link"] : ["link"];
 };
+
+/**
+ * Currencies a provider can actually run `op` in.
+ *
+ * `provider.currencies` is the union of both directions, which isn't the
+ * same list: Abroad settles COP but only BUYS in BRL, so offering COP on the
+ * buy flow would walk the user into a rejected charge two steps later. This
+ * narrows the picker to what the chosen operation can really do.
+ */
+const currenciesForOp = (provider: PaymentProvider, op: Op): Currency[] => {
+  const all = provider.currencies as Currency[];
+  if (provider.name.startsWith("abroad") && op !== "sell") return all.filter((c) => c === "BRL");
+  return [...all];
+};
+
+/** Rails that pay the seller's fiat into their own bank account, and so need its details before the order can be opened. */
+const needsBankDetails = (providerName: string): boolean => providerName.startsWith("abroad");
+
+/** Rails that ask for identity verification before they'll move funds. */
+const needsKyc = (providerName: string): boolean => providerName.startsWith("abroad");
 
 // ---------------------------------------------------------------------------
 // Static assets: flag-icons (npm) for the language switch, plus this demo's
@@ -440,10 +689,28 @@ const NETWORK_PASSPHRASE = IS_MAINNET ? Networks.PUBLIC : Networks.TESTNET;
 const HORIZON_URL = process.env.STELLAR_HORIZON_URL?.trim() || (IS_MAINNET ? "https://horizon.stellar.org" : "https://horizon-testnet.stellar.org");
 /** stellar.expert path segment for this network — used by `stellarExpertTxUrl`. */
 const EXPLORER_NETWORK = IS_MAINNET ? "public" : "testnet";
-/** Circle's USDC on Stellar mainnet. Only consulted when IS_MAINNET. */
+/** Circle's USDC on Stellar mainnet. Consulted when IS_MAINNET, and ALWAYS for Abroad (see `MAINNET_USDC` below). */
 const CIRCLE_USDC_ISSUER = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN";
 
 const stellarServer = new Horizon.Server(HORIZON_URL);
+
+/**
+ * Stellar MAINNET, unconditionally — a second connection kept alongside
+ * whatever `STELLAR_NETWORK` selected above.
+ *
+ * Abroad has no testnet: every corridor it publishes reports
+ * `stellar:pubnet`, and an onramp there delivers real Circle USDC to the
+ * buyer's address. So an Abroad order's trustline has to be checked (and
+ * opened) against mainnet and Circle's issuer even while the rest of this
+ * demo is running on testnet with its own play asset. Checking the testnet
+ * asset instead would pass happily and then strand a real payment: the
+ * buyer would have paid a real PIX charge for USDC their wallet cannot
+ * receive.
+ */
+const MAINNET_HORIZON_URL = process.env.STELLAR_MAINNET_HORIZON_URL?.trim() || "https://horizon.stellar.org";
+const mainnetServer = IS_MAINNET ? stellarServer : new Horizon.Server(MAINNET_HORIZON_URL);
+const MAINNET_USDC = new StellarAsset("USDC", CIRCLE_USDC_ISSUER);
+
 const mp = createMockMercadoPago({ webhookSecret: WEBHOOK_SECRET });
 
 /** Parse a Stellar secret from the environment, failing loudly rather than silently degrading. */
@@ -626,19 +893,47 @@ async function generateDemoWallet(): Promise<string> {
 }
 
 /**
- * Whether `wallet` already has an open trustline for the demo USDC asset —
- * checked via Horizon before deciding whether settlement needs a `changeTrust`
- * op. `false` (never throws) for an account that doesn't exist on testnet
- * yet, same as "no trustline" — settlement/the trustline-open flow handle
- * funding it themselves.
+ * Whether `wallet` already has an open trustline for `asset` — checked via
+ * Horizon before deciding whether settlement needs a `changeTrust` op.
+ * `false` (never throws) for an account that doesn't exist yet, same as "no
+ * trustline" — settlement/the trustline-open flow handle funding it
+ * themselves on testnet.
+ *
+ * `server` decides which network is consulted, which matters because this
+ * demo talks to two: its own (`STELLAR_NETWORK`) and mainnet, for Abroad.
  */
-async function accountTrustsAsset(wallet: string, asset: StellarAsset): Promise<boolean> {
+async function accountTrustsAsset(wallet: string, asset: StellarAsset, server: Horizon.Server = stellarServer): Promise<boolean> {
   try {
-    const account = await stellarServer.loadAccount(wallet);
+    const account = await server.loadAccount(wallet);
     return account.balances.some((b) => "asset_code" in b && "asset_issuer" in b && b.asset_code === asset.getCode() && b.asset_issuer === asset.getIssuer());
   } catch {
     return false;
   }
+}
+
+/**
+ * Which network and asset a given provider's crypto actually arrives as —
+ * the single place that answers "what must this wallet trust?".
+ *
+ * Everything except Abroad is delivered by this demo's own settlement, so
+ * it's whatever `STELLAR_NETWORK` configured. Abroad delivers real Circle
+ * USDC on pubnet itself no matter what this process is otherwise pointed at,
+ * so it always gets mainnet — and `friendbot: false`, because there is no
+ * Friendbot there: an unfunded destination is the user's problem to solve,
+ * not something the demo can paper over.
+ */
+function deliveryTargetFor(providerName: string): {
+  server: Horizon.Server;
+  asset: StellarAsset;
+  passphrase: string;
+  explorer: string;
+  friendbot: boolean;
+  mainnet: boolean;
+} {
+  if (providerName.startsWith("abroad")) {
+    return { server: mainnetServer, asset: MAINNET_USDC, passphrase: Networks.PUBLIC, explorer: "public", friendbot: false, mainnet: true };
+  }
+  return { server: stellarServer, asset: SETTLEMENT_ASSET, passphrase: NETWORK_PASSPHRASE, explorer: EXPLORER_NETWORK, friendbot: !IS_MAINNET, mainnet: IS_MAINNET };
 }
 
 /**
@@ -658,9 +953,13 @@ async function accountTrustsAsset(wallet: string, asset: StellarAsset): Promise<
  * require the receiver to sign.
  */
 const settlementFn: SettlementFn = async ({ order, wallet, amount, asset }) => {
-  if (order.provider.startsWith("etherfuse")) {
-    console.log(`⛓ ${order.provider}: crypto already released internally by Etherfuse — skipping this demo's settlement.`);
-    return { txId: `etherfuse-managed:${order.id}` };
+  // Integrated rails (Etherfuse, Abroad) release the crypto themselves —
+  // they advertise that via `settlesCrypto`. Running this demo's settlement
+  // as well would pay the buyer a second time, out of our own treasury.
+  const provider = ramp.providers.find((p) => p.name === order.provider);
+  if (provider?.settlesCrypto || order.provider.startsWith("etherfuse")) {
+    console.log(`⛓ ${order.provider}: crypto released by the provider itself — skipping this demo's settlement.`);
+    return { txId: `${order.provider}-managed:${order.id}` };
   }
   // Whether a failed release is allowed to degrade into a fake tx id. Fine
   // for a mock-backed order (no money moved either way); NEVER for one whose
@@ -764,6 +1063,43 @@ const etherfuseProvider =
       });
 if (!etherfuseProvider) skippedProviders.push("etherfuse (no ETHERFUSE_API_KEY)");
 
+/**
+ * Abroad — PRODUCTION MODE ONLY (`npm run demo:ui:prod`).
+ *
+ * It has no sandbox: every corridor it publishes is Stellar mainnet, so a
+ * checkout mints a real PIX charge and delivers real Circle USDC. There is
+ * no configuration that makes it otherwise — which puts it fundamentally at
+ * odds with what `--env=test` promises, where Mercado Pago is forced into
+ * sandbox and an uncredentialed provider falls back to a local simulator.
+ * Registering it there would mean one card in the picker quietly moves real
+ * money while every other one can't, and no amount of labelling makes that
+ * a safe default.
+ *
+ * So `--env=test` never registers it, whatever `ABROAD_API_KEY` says. Run
+ * `npm run demo:ui:prod` to exercise it, where "this is real" is the mode's
+ * whole premise.
+ */
+const ABROAD_API_KEY = DEMO_ENV === "production" ? (process.env.ABROAD_API_KEY?.trim() ?? "") : "";
+const abroadProvider = ABROAD_API_KEY
+  ? new AbroadProvider({
+      apiKey: ABROAD_API_KEY,
+      // BRL buys and sells; COP is payout-only (see `currenciesForOp`).
+      currencies: [FiatCurrency.BRL, FiatCurrency.COP],
+      logoUrl: "/assets/logo/abroad.jpg",
+      // Stated rather than derived: Abroad quotes its own binding all-in
+      // price, so this demo's per-rail markup can't be applied on top of it
+      // and there's no live percentage to compute here. This is the headline
+      // figure for the picker; the exact fee Abroad charges on a given order
+      // is shown on the quote and payment screens, straight from its quote.
+      feeLabel: "2.3%",
+      userId: process.env.ABROAD_USER_ID?.trim() || "cosmos-demo-user",
+      webhookSecret: process.env.ABROAD_WEBHOOK_SECRET?.trim() || undefined,
+    })
+  : null;
+if (!abroadProvider) {
+  skippedProviders.push(DEMO_ENV === "production" ? "abroad (no ABROAD_API_KEY)" : "abroad (mainnet-only — run npm run demo:ui:prod)");
+}
+
 const oracle = () => new CoinGeckoOracle({ apiKey: process.env.COINGECKO_API_KEY });
 
 /**
@@ -829,8 +1165,17 @@ function buildMercadoPago(name: string, region: string, currency: FiatCurrency, 
 const mercadoPagoBr = buildMercadoPago("mercadopago-br", "BR", FiatCurrency.BRL, process.env.MP_BR_ACCESS_TOKEN, process.env.MP_BR_WEBHOOK_SECRET);
 const mercadoPagoAr = buildMercadoPago("mercadopago-ar", "AR", FiatCurrency.ARS, process.env.MP_AR_ACCESS_TOKEN, process.env.MP_AR_WEBHOOK_SECRET);
 
-/** Everything that ended up with usable credentials — the picker, `/api/*` and the webhook routes all derive from this and nothing else. */
-const activeProviders: PaymentProvider[] = [etherfuseProvider, mercadoPagoBr, mercadoPagoAr].filter((p): p is NonNullable<typeof p> => p !== null);
+/**
+ * Everything that ended up with usable credentials — the picker, `/api/*`
+ * and the webhook routes all derive from this and nothing else.
+ *
+ * ORDER IS THE PICKER'S ORDER, and it's deliberate: cheapest rail first
+ * (Etherfuse at 2.0%), so the default reading order matches the best deal,
+ * with Abroad last just ahead of the disabled examples.
+ */
+const activeProviders: PaymentProvider[] = [etherfuseProvider, mercadoPagoBr, mercadoPagoAr, abroadProvider].filter(
+  (p): p is NonNullable<typeof p> => p !== null,
+);
 
 if (activeProviders.length === 0) {
   console.error(
@@ -856,7 +1201,10 @@ console.log(
   `Providers: ${ramp.providers.map((p) => (isMockBacked(p.name) ? p.name : `${p.name} (REAL)`)).join(", ")}`,
 );
 if (skippedProviders.length) {
-  console.log(`Not registered (--env=${DEMO_ENV} requires real credentials): ${skippedProviders.join(", ")}`);
+  // Each entry carries its own reason — missing credentials for most, but
+  // Abroad is skipped in test mode on principle rather than for lack of a
+  // key, so a blanket "requires real credentials" here would misreport it.
+  console.log(`Not registered (--env=${DEMO_ENV}): ${skippedProviders.join(", ")}`);
 }
 console.log(`Mercado Pago mode: ${MP_SANDBOX ? "sandbox — no real charges possible" : "⚠ PRODUCTION — real, chargeable preferences"}`);
 // Every credentialed Mercado Pago account POSTs here on each payment update.
@@ -870,24 +1218,56 @@ for (const provider of [mercadoPagoBr, mercadoPagoAr]) {
 // Wizard steps — provider → currency → [method] → amount.
 // ---------------------------------------------------------------------------
 
+/**
+ * Production is BUY ONLY — `SELL_ENABLED` is false there for every provider,
+ * not just the ones that technically could pay out.
+ *
+ * That's a deployment fact rather than a limitation of the SDK: this demo's
+ * operator has no bank payout API wired up on mainnet, so a "sell" in
+ * production would take the user's USDC and owe them fiat nobody can send.
+ * The operation is dropped from the menu, and `/api/sell` refuses too — a
+ * hidden menu item is not a control, since anything can POST the endpoint
+ * directly (`PUBLIC_BASE_URL` puts it on the open internet).
+ */
+const SELL_ENABLED = DEMO_ENV !== "production";
+
 function providersFor(op: Op): readonly PaymentProvider[] {
+  if (op !== "sell") return ramp.providers;
+  if (!SELL_ENABLED) return [];
   // Etherfuse doesn't support payouts in this adapter — leave it out of "sell".
-  return op === "sell" ? ramp.providers.filter((p) => !p.name.startsWith("etherfuse")) : ramp.providers;
+  // Anything else can sell: either it pays out itself (`createPayout`) or it
+  // hands back a deposit address (`createOfframpDeposit`, e.g. Abroad).
+  return ramp.providers.filter((p) => !p.name.startsWith("etherfuse"));
 }
+
+const STEP_LABEL_KEY: Record<string, string> = {
+  provider: "stepProvider",
+  currency: "stepCurrency",
+  method: "stepMethod",
+  wallet: "stepWallet",
+  bank: "stepBank",
+  kyc: "stepKyc",
+  amount: "stepAmount",
+};
 
 function wizardShell(op: Op, lang: Lang, stepName: string, bodyHtml: string): string {
   const steps = STEPS[op];
-  const idx = Math.max(0, steps.indexOf(stepName));
+  // `kyc` isn't in STEPS — it's injected only when the provider asks for it
+  // (see renderKycBody), so it has no fixed position in the progress dots.
+  // It renders as an extra beyond the last dot rather than renumbering a
+  // flow the user has already been walked through.
+  const isExtra = !steps.includes(stepName);
+  const idx = isExtra ? steps.length : Math.max(0, steps.indexOf(stepName));
   const backBtn = idx > 0 ? `<button class="back" onclick="goBack()">${t(lang, "back")}</button>` : "<span></span>";
-  const dots = steps.map((_, i) => `<span class="dot${i === idx ? " active" : ""}"></span>`).join("");
+  const dots = steps.map((_, i) => `<span class="dot${i === idx ? " active" : ""}"></span>`).join("") + (isExtra ? `<span class="dot active"></span>` : "");
   const opTitleKey = op === "buy" ? "opBuy" : op === "sell" ? "opSell" : "opQuote";
   const subtitleKey = op === "buy" ? "subtitleBuy" : op === "sell" ? "subtitleSell" : "subtitleQuote";
-  const stepLabelKey =
-    stepName === "provider" ? "stepProvider" : stepName === "currency" ? "stepCurrency" : stepName === "method" ? "stepMethod" : stepName === "wallet" ? "stepWallet" : "stepAmount";
+  const stepLabelKey = STEP_LABEL_KEY[stepName] ?? "stepAmount";
+  const counter = isExtra ? t(lang, "stepKyc") : `${t(lang, "step")} ${idx + 1} ${t(lang, "of")} ${steps.length}`;
   return `<div style="width:100%;max-width:480px;box-sizing:border-box;margin:0 auto;background:var(--panel);border-radius:24px;padding:24px;font-family:Helvetica, Arial, sans-serif;color:var(--fg)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
       ${backBtn}
-      <span style="font-size:11px;color:var(--muted)">${t(lang, "step")} ${idx + 1} ${t(lang, "of")} ${steps.length}</span>
+      <span style="font-size:11px;color:var(--muted)">${counter}</span>
     </div>
     <div style="display:flex;gap:4px;justify-content:center;margin-bottom:16px">${dots}</div>
     <h1 style="font-size:20px;margin:0 0 4px;text-align:center">${t(lang, opTitleKey)}</h1>
@@ -897,14 +1277,30 @@ function wizardShell(op: Op, lang: Lang, stepName: string, bodyHtml: string): st
   </div>`;
 }
 
-function renderProviderBody(op: Op, state: WizardState): string {
+/**
+ * What each rail costs, for the trailing column of the provider picker —
+ * the whole point of that column being that the cheapest option differs by
+ * region, so it has to be visible without opening each provider in turn.
+ *
+ * A rail that prices its own orders states its own headline figure
+ * (`feeLabel`). Everything else is marked up by this demo, so its
+ * `PROVIDER_FEE` entry is both what's shown here and what `spreadFor()`
+ * actually charges on the quote — no gap between the two.
+ */
+function providerFeeLabel(provider: PaymentProvider): string {
+  return provider.feeLabel ?? `${(spreadFor(provider.name) * 100).toFixed(1)}%`;
+}
+
+function renderProviderBody(op: Op, state: WizardState, lang: Lang): string {
   const available = providersFor(op);
-  // Only reachable in production, where uncredentialed providers aren't
-  // registered at all — e.g. "sell" when the one credentialed provider is
-  // Etherfuse, which has no payout path.
+  // Reachable in production (uncredentialed providers aren't registered at
+  // all) and whenever selling is off — production is buy-only, so "sell"
+  // legitimately has nothing to offer there.
   if (available.length === 0) {
-    return `<p style="color:var(--muted);font-size:13px;margin:0">No payment provider in this run supports ${op === "sell" ? "payouts" : "this operation"}.</p>`;
+    const why = op === "sell" && !SELL_ENABLED ? t(lang, "sellUnavailableProd") : `No payment provider in this run supports ${op === "sell" ? "payouts" : "this operation"}.`;
+    return `<p style="color:var(--muted);font-size:13px;margin:0">${why}</p>`;
   }
+
   const rows = available
     .map((p) => {
       const card = renderToStaticMarkup(
@@ -912,21 +1308,42 @@ function renderProviderBody(op: Op, state: WizardState): string {
           iconLabel={initials(p.name)}
           iconBg="#111827"
           logoUrl={p.logoUrl}
+          logoFills={logoFillsCircle(p.logoUrl)}
           title={providerLabel(p.name)}
-          subtitle={p.currencies.length ? p.currencies.join(" · ") : p.regions.join(" · ")}
+          subtitle={providerSubtitle(p, op, lang)}
           selected={p.name === state.provider}
           radioColor={p.name === state.provider ? "var(--cosmos-fg, #111827)" : "var(--cosmos-radio, #D1D5DB)"}
+          feeLabel={providerFeeLabel(p)}
+          feeCaption={t(lang, "feeCaption")}
         />,
       );
       return `<div class="pickable" onclick="selectStep('provider','${p.name}')">${card}</div>`;
     })
     .join("");
-  return `<div style="display:flex;flex-direction:column;gap:8px">${rows}</div>`;
+
+  // Listed but unselectable — see DISABLED_PROVIDER_EXAMPLES.
+  const disabledRows = DISABLED_PROVIDER_EXAMPLES.map((p) =>
+    renderToStaticMarkup(
+      <PaymentMethodCard
+        iconLabel={initials(p.name)}
+        iconBg="#111827"
+        logoUrl={p.logoUrl}
+        logoFills={logoFillsCircle(p.logoUrl)}
+        title={p.title}
+        subtitle={p.subtitle}
+        disabled
+        badge={t(lang, "comingSoon")}
+        badgeColor="#6B7280"
+      />,
+    ),
+  ).join("");
+
+  return `<div style="display:flex;flex-direction:column;gap:8px">${rows}${disabledRows}</div>`;
 }
 
 function renderCurrencyBody(op: Op, state: WizardState, lang: Lang): string {
   const provider = providersFor(op).find((p) => p.name === state.provider);
-  const currencies = (provider?.currencies.length ? (provider.currencies as Currency[]) : (["ARS", "BRL"] as const)) as readonly Currency[];
+  const currencies = provider ? currenciesForOp(provider, op) : (["ARS", "BRL"] as Currency[]);
   const rows = currencies
     .map((c) => {
       const row = renderToStaticMarkup(
@@ -965,6 +1382,76 @@ function renderSellAmountBody(state: WizardState, lang: Lang): string {
     <button onclick="submitStep()" style="${BUTTON_STYLE}">${t(lang, "continueLabel")}</button>`;
 }
 
+/**
+ * Sell only: the account the fiat is paid INTO.
+ *
+ * A rail like Abroad pays the seller directly rather than routing money
+ * through this demo, so it needs the payee's own local key (PIX in Brazil,
+ * BREB in Colombia) and tax id, and refuses the order without them. Asking
+ * here — before the order is opened — means a missing field is a form
+ * validation, not a failed transaction the seller has already committed
+ * crypto to. Auto-skipped for rails that don't take a payout account.
+ */
+function renderBankBody(state: WizardState, lang: Lang): string {
+  const account = state.bank?.accountNumber ? escapeHtml(state.bank.accountNumber) : "";
+  const taxId = state.bank?.taxId ? escapeHtml(state.bank.taxId) : "";
+  return `<label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px">${t(lang, "bankAccountLabel")}</label>
+    <input id="bankAccountInput" type="text" value="${account}" placeholder="${t(lang, "bankAccountPlaceholder")}" style="${FIELD_STYLE_TIGHT}" />
+    <label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px">${t(lang, "bankTaxIdLabel")}</label>
+    <input id="bankTaxIdInput" type="text" value="${taxId}" placeholder="${t(lang, "bankTaxIdPlaceholder")}" style="${FIELD_STYLE_TIGHT}" />
+    <p style="color:var(--muted);font-size:12px;margin:0 0 20px">${t(lang, "bankHint")}</p>
+    <button onclick="submitBank()" style="${BUTTON_STYLE}">${t(lang, "continueLabel")}</button>`;
+}
+
+/** Document types Abroad accepts. Kept loose — it takes a free string, these are just the sensible defaults. */
+const KYC_DOCUMENT_TYPES = ["ID", "PASSPORT", "DRIVER_LICENSE", "CPF", "CNPJ"] as const;
+
+/**
+ * The extra verification step — rendered only when the provider says this
+ * user isn't verified yet (see the `kycStatus` action), never as a fixed
+ * part of the wizard.
+ *
+ * The fields are exactly what `POST /kyc` requires; a partial submission is
+ * rejected outright, so all of them are marked required client-side too
+ * rather than letting the user discover that from a 400. The document image
+ * is posted straight through to the provider — this demo doesn't store it.
+ */
+function renderKycBody(lang: Lang): string {
+  const half = "flex:1;min-width:0";
+  const field = (id: string, labelKey: string, type = "text", extra = "") =>
+    `<div style="${half}">
+      <label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px">${t(lang, labelKey)}</label>
+      <input id="${id}" type="${type}" ${extra} style="${FIELD_STYLE_TIGHT}" />
+    </div>`;
+  const options = KYC_DOCUMENT_TYPES.map((d) => `<option value="${d}">${d.replace(/_/g, " ")}</option>`).join("");
+  return `<p style="color:var(--muted);font-size:13px;margin:0 0 16px">${t(lang, "kycBody")}</p>
+    <label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px">${t(lang, "kycFullName")}</label>
+    <input id="kycFullName" type="text" style="${FIELD_STYLE_TIGHT}" />
+    <div style="display:flex;gap:8px">
+      <div style="${half}">
+        <label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px">${t(lang, "kycDocumentType")}</label>
+        <select id="kycDocumentType" style="${FIELD_STYLE_TIGHT}">${options}</select>
+      </div>
+      ${field("kycDocumentNumber", "kycDocumentNumber")}
+    </div>
+    <div style="display:flex;gap:8px">
+      ${field("kycDateOfBirth", "kycDateOfBirth", "date")}
+      ${field("kycNationality", "kycNationality", "text", 'maxlength="2" placeholder="BR"')}
+    </div>
+    <div style="display:flex;gap:8px">
+      ${field("kycCity", "kycCity")}
+      ${field("kycAddress", "kycAddress")}
+    </div>
+    <div style="display:flex;gap:8px">
+      ${field("kycEmail", "kycEmail", "email")}
+      ${field("kycPhone", "kycPhone", "tel")}
+    </div>
+    <label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px">${t(lang, "kycDocument")}</label>
+    <input id="kycDocument" type="file" accept="image/*" style="${FIELD_STYLE_TIGHT}" />
+    <div id="kycStatusNote" style="font-size:12px;text-align:center;margin:0 0 12px"></div>
+    <button onclick="submitKyc()" id="kycSubmitBtn" style="${BUTTON_STYLE}">${t(lang, "kycSubmit")}</button>`;
+}
+
 function renderQuoteAmountBody(state: WizardState, lang: Lang): string {
   const currency = state.currency ?? "ARS";
   const value = state.amount ?? DEFAULT_FIAT_AMOUNT[currency];
@@ -1001,48 +1488,82 @@ function renderWalletBody(state: WizardState, lang: Lang): string {
     <input id="walletManualInput" type="text" placeholder="${t(lang, "walletPlaceholder")}" value="${manualValue}" style="${FIELD_STYLE_TIGHT};margin-bottom:0;flex:1;min-width:0" />
     <button type="button" id="useManualWalletBtn" onclick="useManualWallet()" style="flex-shrink:0;background:var(--cosmos-surface-alt);color:var(--cosmos-fg);border:1px solid var(--border);border-radius:10px;padding:11px 16px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">${t(lang, "useThisAddress")}</button>
   </div>
-  ${/* Throwaway wallets need Friendbot, which only exists on testnet. */ ""}
-  ${connected || IS_MAINNET ? "" : `<button type="button" id="demoWalletLink" onclick="useDemoWallet()" style="background:none;border:none;color:var(--muted);font-size:12px;text-decoration:underline;cursor:pointer;padding:0;margin-bottom:16px;display:block">${t(lang, "useDemoWallet")}</button>`}
+  ${/* Throwaway wallets need Friendbot, which only exists on testnet — and
+       an Abroad order is delivered on MAINNET whatever this demo is running
+       on, so a Friendbot wallet could never receive it. Hiding the offer is
+       the point: it would otherwise look like a valid shortcut right up
+       until a real PIX charge had been paid. */ ""}
+  ${connected || IS_MAINNET || deliveryTargetFor(state.provider ?? "").mainnet ? "" : `<button type="button" id="demoWalletLink" onclick="useDemoWallet()" style="background:none;border:none;color:var(--muted);font-size:12px;text-decoration:underline;cursor:pointer;padding:0;margin-bottom:16px;display:block">${t(lang, "useDemoWallet")}</button>`}
   <p style="color:var(--muted);font-size:12px;margin:0 0 20px">${t(lang, "walletHint")}</p>
   <button onclick="continueWallet()" id="walletContinueBtn" style="${BUTTON_STYLE}"${connected ? "" : " disabled"}>${t(lang, "continueLabel")}</button>`;
 }
 
-/** Live, two-way pay/receive quote: editing either field re-quotes the other via /api/quote-preview. */
+/**
+ * Live, two-way pay/receive quote: editing either field re-quotes the other
+ * via /api/quote-preview.
+ *
+ * The quote is taken FOR THE CHOSEN PROVIDER, so a rail that prices its own
+ * orders shows its real price here rather than the oracle's — which is the
+ * price the user is then charged, since `ramp.onramp` binds the same quote
+ * id to the charge. That's also why the pay field is authoritative: Abroad
+ * only prices onramps from the fiat side, so the "you receive" box re-quotes
+ * through the fiat one rather than being inverted arithmetically.
+ */
 async function renderBuyAmountBody(state: WizardState, lang: Lang): Promise<string> {
   const currency = state.currency ?? "ARS";
   const fiatDefault = state.amount ?? DEFAULT_FIAT_AMOUNT[currency];
   let quote: QuoteBreakdown | null = null;
+  let quoteError: string | null = null;
   try {
-    quote = await ramp.quote({ direction: "onramp", currency: toFiatCurrency(currency), amount: fiatDefault, spread: 0.02 });
-  } catch {
-    quote = null;
+    quote = await ramp.quote({
+      direction: "onramp",
+      provider: state.provider ?? undefined,
+      currency: toFiatCurrency(currency),
+      amount: fiatDefault,
+      spread: spreadFor(state.provider),
+    });
+  } catch (error) {
+    // A refusal here is usually actionable ("below the minimum for BRL is
+    // 10") — showing it beats a silent "…" the user can't act on.
+    quoteError = error instanceof AbroadQuoteError ? error.message : null;
   }
   const fiatValue = quote ? quote.fiatAmount : fiatDefault;
   const cryptoValue = quote ? quote.cryptoAmount : "";
   const rate = quote ? quote.effectiveRate.toFixed(4) : "…";
+  const note = quoteError
+    ? `<p id="rateNote" style="text-align:center;color:#B45309;font-size:12px;margin:0 0 20px">${escapeHtml(quoteError)}</p>`
+    : `<p id="rateNote" style="text-align:center;color:var(--muted);font-size:12px;margin:0 0 20px">${t(lang, "rateNote")} ${rate} ${currency}</p>`;
+  const feeNote =
+    quote?.fee && quote.fee.amount > 0
+      ? `<p style="text-align:center;color:var(--muted);font-size:11px;margin:-12px 0 16px">${providerLabel(state.provider ?? "")} fee ≈ ${quote.fee.amount} ${quote.fee.currency}</p>`
+      : "";
   return `<label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px">${t(lang, "youPay")} (${currency})</label>
     <input id="payAmount" type="number" min="0" step="0.01" value="${fiatValue}" oninput="scheduleQuote('fiat')" style="${FIELD_STYLE_TIGHT}" />
     <label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px">${t(lang, "youReceive")} (USDC)</label>
     <input id="receiveAmount" type="number" min="0" step="0.000001" value="${cryptoValue}" oninput="scheduleQuote('crypto')" style="${FIELD_STYLE_TIGHT}" />
-    <p id="rateNote" style="text-align:center;color:var(--muted);font-size:12px;margin:0 0 20px">${t(lang, "rateNote")} ${rate} ${currency}</p>
+    ${note}${feeNote}
     <button onclick="submitStep()" style="${BUTTON_STYLE}">${t(lang, "continueLabel")}</button>`;
 }
 
 async function renderStep(op: Op, stepName: string, state: WizardState, lang: Lang): Promise<string> {
   const body =
     stepName === "provider"
-      ? renderProviderBody(op, state)
+      ? await renderProviderBody(op, state, lang)
       : stepName === "currency"
         ? renderCurrencyBody(op, state, lang)
         : stepName === "method"
           ? renderMethodBody(state, lang)
           : stepName === "wallet"
             ? renderWalletBody(state, lang)
-            : op === "sell"
-              ? renderSellAmountBody(state, lang)
-              : op === "quote"
-                ? renderQuoteAmountBody(state, lang)
-                : await renderBuyAmountBody(state, lang);
+            : stepName === "bank"
+              ? renderBankBody(state, lang)
+              : stepName === "kyc"
+                ? renderKycBody(lang)
+                : op === "sell"
+                  ? renderSellAmountBody(state, lang)
+                  : op === "quote"
+                    ? renderQuoteAmountBody(state, lang)
+                    : await renderBuyAmountBody(state, lang);
   return wizardShell(op, lang, stepName, body);
 }
 
@@ -1073,15 +1594,58 @@ async function renderPending(order: RampOrderData, lang: Lang): Promise<string> 
   );
 }
 
-/** The status card shown while waiting for the seller's crypto to arrive (no QR — offramp has no charge). */
-function renderSellPending(order: RampOrderData, lang: Lang): string {
-  return renderToStaticMarkup(
+/**
+ * The sell-side view: where to send the crypto, and how much.
+ *
+ * When the provider custodies the crypto leg it hands back a real per-order
+ * deposit address and memo (`order.deposit`) — this renders a scannable
+ * Stellar payment URI for it plus every field spelled out and copyable,
+ * because that address is the only place the funds can go and the memo is
+ * the only thing that identifies them once they land.
+ *
+ * Rails where this demo would collect the crypto into its own treasury have
+ * no such address, so they keep the plain "waiting for your USDC" card — the
+ * previous behaviour, and the reason the sell flow used to show nothing
+ * actionable at all for a provider like Abroad.
+ */
+async function renderSellPending(order: RampOrderData, lang: Lang): Promise<string> {
+  const deposit = order.deposit;
+  if (!deposit) {
+    return renderToStaticMarkup(
+      <ReceivePayment
+        title={t(lang, "waitingCrypto")}
+        amount={`${order.quote.cryptoAmount} ${order.quote.asset}`}
+        rows={rampOrderToDetailRows(order, { settlementTxUrl: stellarExpertTxUrl })}
+      />,
+    );
+  }
+
+  // SEP-0007 `web+stellar:pay` — what a Stellar wallet scans to prefill the
+  // destination, amount AND memo in one go, which is exactly the trio a
+  // hand-typed transfer gets wrong.
+  const uri =
+    `web+stellar:pay?destination=${encodeURIComponent(deposit.address)}` +
+    `&amount=${encodeURIComponent(String(deposit.amount))}` +
+    `&asset_code=${encodeURIComponent(deposit.asset)}` +
+    (deposit.asset === "USDC" ? `&asset_issuer=${encodeURIComponent(CIRCLE_USDC_ISSUER)}` : "") +
+    (deposit.memo ? `&memo=${encodeURIComponent(deposit.memo)}&memo_type=MEMO_TEXT` : "");
+
+  const rows = [...offrampDepositToDetailRows(deposit), ...rampOrderToDetailRows(order, { settlementTxUrl: stellarExpertTxUrl })];
+  const card = renderToStaticMarkup(
     <ReceivePayment
-      title={t(lang, "waitingCrypto")}
-      amount={`${order.quote.cryptoAmount} ${order.quote.asset}`}
-      rows={rampOrderToDetailRows(order, { settlementTxUrl: stellarExpertTxUrl })}
+      locale={lang}
+      title={t(lang, "depositTitle")}
+      amount={`${deposit.amount} ${deposit.asset}`}
+      statusLabel={t(lang, "waitingCrypto")}
+      statusColor="#F59E0B"
+      qr={{ src: await renderQrDataUrl(uri, { width: 240 }) }}
+      rows={rows}
     />,
   );
+  const memoWarning = deposit.memo
+    ? `<p style="max-width:480px;margin:12px auto 0;font-size:12px;color:#B45309;background:#B4530915;border-radius:10px;padding:10px 12px">⚠ ${t(lang, "depositMemoWarning")}</p>`
+    : "";
+  return `<div>${card}${memoWarning}</div>`;
 }
 
 /** The receipt shown once an order is paid and settled. */
@@ -1109,18 +1673,40 @@ function renderReceipt(order: RampOrderData): string {
   );
 }
 
-/** A quote-only summary — no order is created. */
-function renderQuoteResult(quote: QuoteBreakdown): string {
-  return renderToStaticMarkup(
+/**
+ * A quote-only summary — no order is created.
+ *
+ * Ends in two controls rather than none: a quote is something you act on,
+ * and previously this screen was a dead end you could only escape by
+ * restarting the whole flow from the FAB. "Change amount" walks back to the
+ * amount step with the figure preserved; "Continue to payment" carries the
+ * same provider/currency/amount into the buy flow. When the quote came from
+ * the provider itself it also shows when that price stops being honoured,
+ * since it's a real expiry rather than a rolling estimate.
+ */
+function renderQuoteResult(quote: QuoteBreakdown, lang: Lang, canBuy: boolean): string {
+  const card = renderToStaticMarkup(
     <div style={{ width: "100%", maxWidth: 480, boxSizing: "border-box", margin: "0 auto", background: "var(--panel, #fff)", borderRadius: 16, padding: 20, fontFamily: "Helvetica, Arial, sans-serif", color: "var(--fg, #111827)" }}>
       <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
         {quote.asset} · {quote.currency}
+        {quote.provider ? <span style={{ fontWeight: 400, color: "var(--muted, #6B7280)" }}> · {providerLabel(quote.provider)}</span> : null}
       </div>
       {quoteToSummaryRows(quote).map((row, i) => (
         <SummaryRow key={i} {...row} />
       ))}
+      {quote.expiresAt ? (
+        <div style={{ fontSize: 11, color: "var(--muted, #6B7280)", textAlign: "center", marginTop: 10 }}>
+          {t(lang, "quoteExpires")} {new Date(quote.expiresAt).toLocaleTimeString()}
+        </div>
+      ) : null}
     </div>,
   );
+  const proceed = canBuy
+    ? `<button onclick="proceedFromQuote()" style="${BUTTON_STYLE};margin-top:12px">${t(lang, "quoteProceed")}</button>`
+    : "";
+  return `<div>${card}${proceed}
+    <button onclick="backToQuoteAmount()" style="width:100%;background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:12px;margin-top:4px">${t(lang, "quoteBack")}</button>
+  </div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1137,6 +1723,21 @@ function renderQuoteResult(quote: QuoteBreakdown): string {
  * hasn't gone out, instead of spinning on "pending" forever.
  */
 const settlementFailures = new Map<string, string>();
+
+/**
+ * "This user isn't verified yet" as raised from anywhere in the chain.
+ *
+ * Matched by name as well as by `instanceof` because the error crosses a
+ * `ramp.onramp` call and may arrive wrapped — and mistaking it for a generic
+ * failure would show the user a dead end when the fix (fill in the
+ * verification form) is one step away.
+ */
+function isKycRequired(error: unknown): boolean {
+  if (error instanceof AbroadKycRequiredError) return true;
+  const named = error as { name?: string; code?: string; cause?: unknown };
+  if (named?.name === "AbroadKycRequiredError" || named?.code === "KYC_REQUIRED") return true;
+  return named?.cause !== undefined && isKycRequired(named.cause);
+}
 
 async function finalizeOrder(order: RampOrderData): Promise<RampOrderData> {
   await ramp.store.update(order.id, { status: "paid" });
@@ -1168,7 +1769,23 @@ async function finalizeOrder(order: RampOrderData): Promise<RampOrderData> {
  * never touches this demo's asset.
  */
 async function assertWalletCanReceive(wallet: string, providerName: string): Promise<void> {
+  // Etherfuse delivers to a wallet it registered itself, not to this one.
   if (providerName.startsWith("etherfuse")) return;
+
+  const target = deliveryTargetFor(providerName);
+
+  // Abroad delivers real Circle USDC on mainnet, so the check runs against
+  // MAINNET regardless of STELLAR_NETWORK — and none of the testnet escape
+  // hatches below apply: a Friendbot-funded demo wallet exists only on
+  // testnet, so it can't receive this at all.
+  if (target.mainnet && !IS_MAINNET) {
+    if (await accountTrustsAsset(wallet, target.asset, target.server)) return;
+    throw new Error(
+      `${wallet} has no trustline for USDC (issuer ${target.asset.getIssuer()}) on Stellar MAINNET, which is where ${providerLabel(providerName)} delivers. ` +
+        `Open that trustline from the wallet that owns this address, then check out again — paying first would mean a real charge for USDC that cannot be delivered.`,
+    );
+  }
+
   if (walletByAddress.has(wallet)) return; // server-held demo wallet — settlement opens the trustline itself
   if (!(await ensureStellarReady())) {
     throw new Error(
@@ -1178,10 +1795,10 @@ async function assertWalletCanReceive(wallet: string, providerName: string): Pro
     );
   }
 
-  if (await accountTrustsAsset(wallet, SETTLEMENT_ASSET)) return;
+  if (await accountTrustsAsset(wallet, target.asset, target.server)) return;
 
   throw new Error(
-    `${wallet} has no trustline for ${DEMO_ASSET_CODE} (issuer ${SETTLEMENT_ASSET.getIssuer()}), so the ${DEMO_ASSET_CODE} could not be delivered after you paid. ` +
+    `${wallet} has no trustline for ${DEMO_ASSET_CODE} (issuer ${target.asset.getIssuer()}), so the ${DEMO_ASSET_CODE} could not be delivered after you paid. ` +
       `Open the trustline first — go back to the wallet step and approve it — then check out again.`,
   );
 }
@@ -1270,7 +1887,7 @@ const actions: Record<string, Action> = {
   async checkout(body) {
     const providerName = ramp.providers.some((p) => p.name === body.provider) ? body.provider : ramp.providers[0]!.name;
     const currency = parseCurrency(body.currency);
-    const method: Method = currency === "BRL" && body.method === "qr" ? "qr" : "link";
+    const method: Method = methodsForProvider(providerName, currency).includes("qr") && body.method !== "link" ? "qr" : "link";
     const requested = Number(body.amount);
     const amount = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_FIAT_AMOUNT[currency];
     const lang: Lang = STRINGS[body.lang as Lang] ? body.lang : "en";
@@ -1285,16 +1902,77 @@ const actions: Record<string, Action> = {
     // where nothing has been charged yet, rather than at settlement.
     await assertWalletCanReceive(wallet, providerName);
 
-    const order = await ramp.onramp({
-      provider: providerName,
-      amount,
-      currency: toFiatCurrency(currency),
-      spread: 0.02,
-      wallet,
-      method,
-      description: "Buy USDC (demo)",
-    });
-    return { orderId: order.id, resultHtml: await renderPending(order, lang) };
+    try {
+      const order = await ramp.onramp({
+        provider: providerName,
+        amount,
+        currency: toFiatCurrency(currency),
+        spread: spreadFor(providerName),
+        wallet,
+        method,
+        description: "Buy USDC (demo)",
+      });
+      return { orderId: order.id, resultHtml: await renderPending(order, lang) };
+    } catch (error) {
+      // The provider will not move funds for an unverified user. That's a
+      // step to complete, not a failure — hand the client a marker so it can
+      // show the verification form and retry, instead of a dead-end toast.
+      if (isKycRequired(error)) return { kycRequired: true };
+      throw error;
+    }
+  },
+
+  /**
+   * Whether this provider needs identity verification from this user before
+   * a transaction will go through. Consulted BEFORE checkout so the form
+   * appears as an ordinary extra step rather than as the recovery from a
+   * failed payment attempt.
+   *
+   * Providers that don't do KYC answer `required: false` without a network
+   * call, so this is safe to call unconditionally from the client.
+   */
+  async kycStatus(body) {
+    const provider = ramp.providers.find((p) => p.name === body.provider);
+    if (!provider || !(provider instanceof AbroadProvider)) return { required: false, approved: true };
+    const status = await provider.getKycStatus();
+    return { required: !status.approved, approved: status.approved, status: status.status };
+  },
+
+  /**
+   * Forwards the verification form to the provider.
+   *
+   * The document image arrives as a base64 data URL (the client reads the
+   * file itself — there's no multipart parser in this demo's little HTTP
+   * server) and is turned back into bytes here, posted straight through, and
+   * dropped. Nothing about it is written to disk or kept in memory past this
+   * call: it's someone's identity document, and this demo has no business
+   * holding one.
+   */
+  async submitKyc(body) {
+    const provider = ramp.providers.find((p) => p.name === body.provider);
+    if (!provider || !(provider instanceof AbroadProvider)) throw new Error(`${body.provider} doesn't take identity verification through this demo.`);
+
+    const dataUrl = typeof body.document === "string" ? body.document : "";
+    const match = /^data:(image\/[a-z.+-]+);base64,(.+)$/i.exec(dataUrl);
+    if (!match) throw new Error("Attach a photo of your identity document (JPEG or PNG).");
+    const [, mimeType, base64] = match;
+    const bytes = Buffer.from(base64!, "base64");
+    if (!bytes.length) throw new Error("That document image is empty — attach it again.");
+
+    const required = ["fullName", "documentType", "documentNumber", "dateOfBirth", "nationality", "city", "address", "email", "phone"] as const;
+    const submission: Record<string, string> = {};
+    for (const field of required) {
+      const value = typeof body[field] === "string" ? body[field].trim() : "";
+      if (!value) throw new Error(`Missing "${field}" — every field on the verification form is required.`);
+      submission[field] = value;
+    }
+
+    const result = await provider.client.submitKyc(
+      { userId: body.userId?.trim() || process.env.ABROAD_USER_ID?.trim() || "cosmos-demo-user", ...(submission as any) },
+      new Blob([bytes], { type: mimeType }),
+      `document.${mimeType!.split("/")[1]}`,
+    );
+    return { status: result.status, approved: result.status === "APPROVED" };
   },
 
   /** Opt-in fallback for the wallet step's "no wallet installed?" link — a fresh, Friendbot-funded testnet address. */
@@ -1302,11 +1980,20 @@ const actions: Record<string, Action> = {
     return { wallet: await generateDemoWallet() };
   },
 
-  /** Whether `wallet` already trusts the demo USDC asset — the wallet step checks this before checkout to decide whether to prompt for a trustline. */
+  /**
+   * Whether `wallet` already trusts the asset THIS PROVIDER will deliver —
+   * the wallet step checks it before checkout to decide whether to prompt.
+   *
+   * `provider` matters: for Abroad the answer is about Circle's USDC on
+   * mainnet, for everything else about this demo's own asset on whatever
+   * network it's running. Answering with the wrong one would wave through a
+   * wallet that can't receive the payment.
+   */
   async checkTrustline(body) {
     const wallet = typeof body.wallet === "string" ? body.wallet.trim() : "";
     if (!isValidStellarAddress(wallet)) return { trusts: false };
-    return { trusts: await accountTrustsAsset(wallet, SETTLEMENT_ASSET) };
+    const target = deliveryTargetFor(typeof body.provider === "string" ? body.provider : "");
+    return { trusts: await accountTrustsAsset(wallet, target.asset, target.server), mainnet: target.mainnet };
   },
 
   /**
@@ -1324,27 +2011,36 @@ const actions: Record<string, Action> = {
   async trustlineTransaction(body) {
     const wallet = typeof body.wallet === "string" ? body.wallet.trim() : "";
     if (!isValidStellarAddress(wallet)) throw new Error("Invalid Stellar address.");
-    if (!(await ensureStellarReady())) throw new Error("Stellar is unreachable right now — try again in a moment.");
+    // Which network/asset this trustline is FOR depends on who's delivering
+    // — an Abroad buyer needs to trust Circle's USDC on mainnet, and signing
+    // a testnet changeTrust instead would look like success and change
+    // nothing about whether the payment can land.
+    const target = deliveryTargetFor(typeof body.provider === "string" ? body.provider : "");
+    if (!target.mainnet && !(await ensureStellarReady())) throw new Error("Stellar is unreachable right now — try again in a moment.");
     let account;
     try {
-      account = await stellarServer.loadAccount(wallet);
+      account = await target.server.loadAccount(wallet);
     } catch {
-      if (IS_MAINNET) {
+      if (!target.friendbot) {
         throw new Error(`${wallet} doesn't exist on Stellar mainnet yet — fund it with at least ~1.5 XLM (base reserve plus the trustline's), then try again.`);
       }
-      await stellarServer.friendbot(wallet).call();
-      account = await stellarServer.loadAccount(wallet);
+      await target.server.friendbot(wallet).call();
+      account = await target.server.loadAccount(wallet);
     }
-    const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: NETWORK_PASSPHRASE }).addOperation(Operation.changeTrust({ asset: SETTLEMENT_ASSET })).setTimeout(60).build();
-    return { xdr: tx.toXDR(), networkPassphrase: NETWORK_PASSPHRASE };
+    const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: target.passphrase })
+      .addOperation(Operation.changeTrust({ asset: target.asset }))
+      .setTimeout(60)
+      .build();
+    return { xdr: tx.toXDR(), networkPassphrase: target.passphrase };
   },
 
-  /** Submits a client-signed `changeTrust` XDR (from `trustlineTransaction`) to the configured Stellar network. */
+  /** Submits a client-signed `changeTrust` XDR (from `trustlineTransaction`) to the network that built it — mainnet for an Abroad order, this demo's network otherwise. */
   async submitTrustline(body) {
     const xdr = typeof body.xdr === "string" ? body.xdr : "";
     if (!xdr) throw new Error("Missing signed transaction.");
-    const tx = TransactionBuilder.fromXDR(xdr, NETWORK_PASSPHRASE);
-    const result = await stellarServer.submitTransaction(tx);
+    const target = deliveryTargetFor(typeof body.provider === "string" ? body.provider : "");
+    const tx = TransactionBuilder.fromXDR(xdr, target.passphrase);
+    const result = await target.server.submitTransaction(tx);
     return { txHash: result.hash };
   },
 
@@ -1371,6 +2067,23 @@ const actions: Record<string, Action> = {
   async status(body) {
     let order = await ramp.getOrder(body.orderId);
     if (!order) throw new Error("Order not found.");
+
+    // Offramp on a rail that custodies the crypto: the provider is watching
+    // the chain for the seller's deposit, so its transaction status IS the
+    // order status. Nothing here fabricates an arrival — an untouched
+    // deposit address just keeps reading back as pending.
+    if (order.direction === "offramp" && order.deposit && (order.status === "created" || order.status === "settling")) {
+      try {
+        const state = await ramp.provider(order.provider).getCharge(order.deposit.id);
+        if (state.status === "approved") {
+          order = (await ramp.store.update(order.id, { status: "completed", settlementTxId: (state.raw as { on_chain_tx_hash?: string })?.on_chain_tx_hash ?? undefined }))!;
+        } else if (state.status === "rejected" || state.status === "expired") {
+          order = (await ramp.store.update(order.id, { status: state.status === "expired" ? "expired" : "failed" }))!;
+        }
+      } catch (error) {
+        console.error(`status poll [${order.provider}] could not read the offramp transaction:`, (error as Error).message ?? error);
+      }
+    }
 
     if (order.status === "created" && order.charge && !isMockBacked(order.provider)) {
       let approved = false;
@@ -1401,10 +2114,13 @@ const actions: Record<string, Action> = {
     return { done: false };
   },
 
-  /** Creates an offramp order (crypto → fiat) and returns the "waiting for your USDC" view. */
+  /** Creates an offramp order (crypto → fiat) and returns the deposit instructions (or the plain waiting card, for a rail with no deposit address). */
   async sell(body) {
-    // Can legitimately be empty now: Etherfuse has no payout path, so a
-    // production run credentialed for Etherfuse alone supports no "sell".
+    // Production is buy-only — refused here as well as hidden from the menu,
+    // because this endpoint is reachable by anyone who can reach the tunnel.
+    if (!SELL_ENABLED) throw new Error("Selling is disabled in production mode — this demo can only buy USDC there.");
+    // Can also legitimately be empty: Etherfuse has no payout path, so a run
+    // credentialed for Etherfuse alone supports no "sell".
     const sellProviders = providersFor("sell");
     if (sellProviders.length === 0) throw new Error("No provider in this run supports payouts — selling is unavailable.");
     const providerName = sellProviders.some((p) => p.name === body.provider) ? body.provider : sellProviders[0]!.name;
@@ -1413,14 +2129,26 @@ const actions: Record<string, Action> = {
     const cryptoAmount = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_CRYPTO_AMOUNT;
     const lang: Lang = STRINGS[body.lang as Lang] ? body.lang : "en";
 
-    const order = await ramp.offramp({
-      provider: providerName,
-      cryptoAmount,
-      currency: toFiatCurrency(currency),
-      spread: 0.02,
-      destination: { email: "seller@example.com" },
-    });
-    return { orderId: order.id, resultHtml: renderSellPending(order, lang) };
+    // Where the money lands. A rail that pays the seller directly needs
+    // their own account details; the mock/Mercado Pago path keeps its
+    // placeholder email, which is all its payout stub ever used.
+    const destination: Record<string, unknown> = needsBankDetails(providerName)
+      ? { accountNumber: typeof body.bankAccount === "string" ? body.bankAccount.trim() : "", taxId: typeof body.bankTaxId === "string" ? body.bankTaxId.trim() : "" }
+      : { email: "seller@example.com" };
+
+    try {
+      const order = await ramp.offramp({
+        provider: providerName,
+        cryptoAmount,
+        currency: toFiatCurrency(currency),
+        spread: spreadFor(providerName),
+        destination,
+      });
+      return { orderId: order.id, resultHtml: await renderSellPending(order, lang) };
+    } catch (error) {
+      if (isKycRequired(error)) return { kycRequired: true };
+      throw error;
+    }
   },
 
   /** Simulates the seller's crypto arriving → triggers the fiat payout → returns the receipt view. */
@@ -1429,19 +2157,35 @@ const actions: Record<string, Action> = {
     return { resultHtml: renderReceipt(order) };
   },
 
-  /** Pure quote — no order created. Pricing is oracle-based, not provider-specific; `provider` is accepted for UI consistency. */
+  /**
+   * Pure quote — no order created.
+   *
+   * Priced FOR THE CHOSEN PROVIDER: a rail that publishes its own prices is
+   * quoted through its API, so what's shown here is what that rail would
+   * actually charge, and comparing two providers means something. Oracle
+   * pricing (mid rate + this demo's spread) is the fallback for rails that
+   * only collect fiat.
+   */
   async quote(body) {
     const currency = parseCurrency(body.currency);
     const requested = Number(body.amount);
     const amount = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_FIAT_AMOUNT[currency];
+    const lang: Lang = STRINGS[body.lang as Lang] ? body.lang : "en";
+    const providerName = ramp.providers.some((p) => p.name === body.provider) ? (body.provider as string) : undefined;
 
     const quote = await ramp.quote({
       direction: "onramp",
+      provider: providerName,
       currency: toFiatCurrency(currency),
       amount,
-      spread: 0.02,
+      spread: spreadFor(providerName),
     });
-    return { resultHtml: renderQuoteResult(quote) };
+    // A quote is a decision point, not a terminus: the result carries its
+    // own way back (re-enter the amount) and forward (buy at this price).
+    // Buying on from here is only offered when the provider can actually
+    // sell this currency — Abroad quotes COP but doesn't sell it.
+    const canBuy = providerName ? currenciesForOp(ramp.provider(providerName), "buy").includes(currency) : true;
+    return { resultHtml: renderQuoteResult(quote, lang, canBuy) };
   },
 };
 
@@ -1533,25 +2277,62 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       method: url.searchParams.get("method") === "qr" ? "qr" : url.searchParams.get("method") === "link" ? "link" : null,
       wallet: url.searchParams.get("wallet") || null,
       amount: amountParam ? Number(amountParam) : null,
+      bank: {
+        accountNumber: url.searchParams.get("bankAccount") || undefined,
+        taxId: url.searchParams.get("bankTaxId") || undefined,
+      },
     };
-    const providers = providersFor(op).map((p) => ({ name: p.name, currencies: p.currencies }));
+    // `currencies` is narrowed to the CURRENT operation so the client's
+    // auto-skip logic matches the server's: Abroad exposes BRL+COP but only
+    // buys in BRL, and a client that thought otherwise would skip the
+    // currency step straight into an unbuyable pair.
+    const providers = providersFor(op).map((p) => ({
+      name: p.name,
+      currencies: currenciesForOp(p, op),
+      needsBank: needsBankDetails(p.name),
+      needsKyc: needsKyc(p.name),
+    }));
     const html = await renderStep(op, stepName, state, lang);
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ html, providers }));
     return;
   }
-  /** Live re-quote for the buy amount step: pass either `amount` (fiat) or `cryptoAmount`, get the other back. Provider-agnostic — pricing is oracle-based. */
+  /**
+   * Live re-quote for the buy amount step: pass either `amount` (fiat) or
+   * `cryptoAmount`, get the other back — priced by the chosen provider when
+   * it prices its own orders, so the preview matches what checkout will
+   * charge rather than an oracle estimate the rail doesn't honour.
+   *
+   * A provider that can only be quoted from the fiat side (Abroad) can't
+   * answer a `cryptoAmount` preview at all. Rather than silently switching
+   * to the oracle — which would show a price that isn't on offer — it
+   * converges on the fiat side: an approximate fiat amount is derived from
+   * the last known rate and re-quoted properly, so the number on screen is
+   * always one the provider actually returned.
+   */
   if (req.method === "GET" && url.pathname === "/api/quote-preview") {
     const currency = parseCurrency(url.searchParams.get("currency"));
     const amountParam = url.searchParams.get("amount");
     const cryptoParam = url.searchParams.get("cryptoAmount");
+    const providerName = url.searchParams.get("provider");
+    const provider = providerName && ramp.providers.some((p) => p.name === providerName) ? providerName : undefined;
     try {
-      const quote = await ramp.quote({
-        direction: "onramp",
-        currency: toFiatCurrency(currency),
-        amount: amountParam ? Number(amountParam) : undefined,
-        cryptoAmount: cryptoParam ? Number(cryptoParam) : undefined,
-        spread: 0.02,
-      });
+      const base = { direction: "onramp" as const, provider, currency: toFiatCurrency(currency), spread: spreadFor(provider) };
+      let quote: QuoteBreakdown;
+      const fiatOnly = !!provider && ramp.provider(provider).getQuote && !!cryptoParam && !amountParam;
+      if (fiatOnly) {
+        const wanted = Number(cryptoParam);
+        if (!Number.isFinite(wanted) || wanted <= 0) throw new Error("Enter an amount greater than zero.");
+        // One reference quote to learn the rate, then a real quote at the
+        // fiat amount that rate implies. The second is the binding one.
+        const reference = await ramp.quote({ ...base, amount: DEFAULT_FIAT_AMOUNT[currency] });
+        quote = await ramp.quote({ ...base, amount: Math.round(wanted * reference.effectiveRate * 100) / 100 });
+      } else {
+        quote = await ramp.quote({
+          ...base,
+          amount: amountParam ? Number(amountParam) : undefined,
+          cryptoAmount: cryptoParam ? Number(cryptoParam) : undefined,
+        });
+      }
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ quote }));
     } catch (error) {
       res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: String((error as Error).message ?? error) }));
@@ -1580,16 +2361,22 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
   res.writeHead(404).end();
 });
 
-server.listen(PORT, () => {
-  console.log(`Demo UI running → http://localhost:${PORT}`);
-});
+// NOTE: `server.listen` is deliberately at the very BOTTOM of this file, not
+// here. `PAGE` below is built with a top-level `await` (it server-renders the
+// first step, which now takes live provider quotes to price the picker), and
+// a `const` isn't initialized until that await resolves. Listening before
+// then means every `GET /` in that window dies on "Cannot access 'PAGE'
+// before initialization" — a race that used to be microseconds wide and is
+// now seconds. Bind the port once there's something to serve.
 
 // ---------------------------------------------------------------------------
 // Page (vanilla HTML/JS shell — the payment views inside #view are the real
 // cosmos-providers/react components, server-rendered per request above)
 // ---------------------------------------------------------------------------
 
-const INITIAL_PROVIDERS = JSON.stringify(providersFor("buy").map((p) => ({ name: p.name, currencies: p.currencies })));
+const INITIAL_PROVIDERS = JSON.stringify(
+  providersFor("buy").map((p) => ({ name: p.name, currencies: currenciesForOp(p, "buy"), needsBank: needsBankDetails(p.name), needsKyc: needsKyc(p.name) })),
+);
 
 const PAGE = /* html */ `<!doctype html>
 <html lang="en">
@@ -1768,7 +2555,7 @@ const PAGE = /* html */ `<!doctype html>
   <button id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path></svg></button>
 </div>
 <main>
-  <div id="view">${await renderStep("buy", "provider", { provider: null, currency: null, method: null, wallet: null, amount: null }, "en")}</div>
+  <div id="view">${await renderStep("buy", "provider", { provider: null, currency: null, method: null, wallet: null, amount: null, bank: null }, "en")}</div>
   <div id="actions"></div>
 </main>
 <div id="fab-wrap">
@@ -1783,8 +2570,13 @@ const PAGE = /* html */ `<!doctype html>
   var op = 'buy';
   var uiMode = 'wizard';
   var stepIdx = 0;
-  var state = { provider: null, currency: null, method: null, wallet: null, walletSource: null, amount: null };
+  var state = { provider: null, currency: null, method: null, wallet: null, walletSource: null, amount: null, bankAccount: null, bankTaxId: null };
   var orderId = null;
+  // Set while the verification step is on screen: what to run once the
+  // provider approves the user, so KYC resumes the flow instead of dropping
+  // them back at the start of it.
+  var kycResume = null;
+  var SELL_ENABLED = ${SELL_ENABLED};
   // 'buy' | 'sell' | null — which kind of order (if any) is currently pending
   // completion, i.e. showing a ReceivePayment view and being polled/confirmable.
   var pendingKind = null;
@@ -1797,13 +2589,22 @@ const PAGE = /* html */ `<!doctype html>
   ${INITIAL_PROVIDERS}.forEach(function (p) { PROVIDER_META[p.name] = p; });
 
   function STR(key) { return (STR_DICT[lang] && STR_DICT[lang][key]) || key; }
+  // Mirrors methodsForProvider() on the server — both drive the same
+  // auto-skip decisions, so they have to agree or the wizard skips a step
+  // the server still expects (or stops on one it would have skipped).
   function methodsFor(provider, currency) {
     if (provider && provider.indexOf('etherfuse') === 0) return ['link'];
+    if (provider && provider.indexOf('abroad') === 0) return ['qr'];
     return currency === 'BRL' ? ['qr', 'link'] : ['link'];
   }
   function currenciesFor(provider) {
     var meta = PROVIDER_META[provider];
     return meta ? meta.currencies : ['ARS', 'BRL', 'MXN'];
+  }
+  /** Whether the sell flow's payout-account step applies to this provider — server-authoritative, sent with each step. */
+  function needsBankFor(provider) {
+    var meta = PROVIDER_META[provider];
+    return !!(meta && meta.needsBank);
   }
 
   function showToast(message, type) {
@@ -1953,6 +2754,8 @@ const PAGE = /* html */ `<!doctype html>
     if (state.method) qs.set('method', state.method);
     if (state.wallet) qs.set('wallet', state.wallet);
     if (state.amount != null) qs.set('amount', String(state.amount));
+    if (state.bankAccount) qs.set('bankAccount', state.bankAccount);
+    if (state.bankTaxId) qs.set('bankTaxId', state.bankTaxId);
     try {
       var res = await fetch('/api/step?' + qs.toString());
       var data = await res.json();
@@ -1980,18 +2783,29 @@ const PAGE = /* html */ `<!doctype html>
     var payInput = document.getElementById('payAmount');
     var receiveInput = document.getElementById('receiveAmount');
     if (!payInput || !receiveInput) return;
-    var qs = new URLSearchParams({ currency: state.currency || 'ARS' });
+    var qs = new URLSearchParams({ currency: state.currency || 'ARS', provider: state.provider || '' });
     if (lastEdited === 'fiat') qs.set('amount', payInput.value || '0');
     else qs.set('cryptoAmount', receiveInput.value || '0');
+    var note = document.getElementById('rateNote');
     try {
       var res = await fetch('/api/quote-preview?' + qs.toString());
       var data = await res.json();
-      if (data.error || !data.quote) return;
+      if (data.error) {
+        // Provider refusals here are specific and worth reading ("the
+        // minimum allowed amount for BRL is 10 BRL") — show it inline
+        // instead of leaving a stale rate that implies the amount is fine.
+        if (note) { note.textContent = data.error; note.style.color = '#B45309'; }
+        return;
+      }
+      if (!data.quote) return;
+      // Only the field the user ISN'T typing in gets rewritten — clobbering
+      // the focused input mid-keystroke would move their cursor. state.amount
+      // always tracks the fiat side, which is what checkout submits and what
+      // the provider's quote is bound to.
       if (lastEdited === 'fiat') receiveInput.value = data.quote.cryptoAmount;
       else payInput.value = data.quote.fiatAmount;
       state.amount = Number(payInput.value);
-      var note = document.getElementById('rateNote');
-      if (note) note.textContent = STR('rateNote') + ' ' + data.quote.effectiveRate.toFixed(4) + ' ' + (state.currency || 'ARS');
+      if (note) { note.textContent = STR('rateNote') + ' ' + data.quote.effectiveRate.toFixed(4) + ' ' + (state.currency || 'ARS'); note.style.color = 'var(--muted)'; }
     } catch (err) {
       // Silent — this is a debounced live preview on every keystroke; a stale/failed
       // tick isn't worth interrupting typing with a toast, the next keystroke retries.
@@ -2029,25 +2843,34 @@ const PAGE = /* html */ `<!doctype html>
     await fetchStep();
   }
 
-  var STEP_FIELDS = ['provider', 'currency', 'method', 'wallet', 'amount'];
+  var STEP_FIELDS = ['provider', 'currency', 'method', 'wallet', 'amount', 'bank'];
+
+  /** Steps the forward flow would auto-skip for the current provider — kept in one place so goBack() unwinds exactly what selectStep() skipped. */
+  function isSkippedStep(name) {
+    if (name === 'currency') return currenciesFor(state.provider).length === 1;
+    if (name === 'method') return methodsFor(state.provider, state.currency).length === 1;
+    if (name === 'bank') return !needsBankFor(state.provider);
+    return false;
+  }
 
   function goBack() {
+    // The verification step sits outside STEPS — backing out of it returns
+    // to the step the user was on when the provider asked for it, with
+    // everything they'd entered intact.
+    if (kycResume) { kycResume = null; fetchStep(); return; }
     if (stepIdx === 0) return;
     stepIdx--;
     // Unwind every step that would've been auto-skipped going forward (single
-    // currency / single method), so we land exactly where the forward flow
-    // branched instead of on a view that was never actually shown.
-    while (stepIdx > 0) {
-      var name = STEPS[op][stepIdx];
-      if (name === 'currency' && currenciesFor(state.provider).length === 1) { stepIdx--; continue; }
-      if (name === 'method' && methodsFor(state.provider, state.currency).length === 1) { stepIdx--; continue; }
-      break;
-    }
+    // currency / single method / no payout account needed), so we land exactly
+    // where the forward flow branched instead of on a view that was never
+    // actually shown.
+    while (stepIdx > 0 && isSkippedStep(STEPS[op][stepIdx])) stepIdx--;
     // The step we land on (and everything after it) is being re-chosen — clear
     // it so it doesn't render as still-selected.
     var landingIdx = STEP_FIELDS.indexOf(STEPS[op][stepIdx]);
     STEP_FIELDS.slice(landingIdx).forEach(function (f) { state[f] = null; });
     if (landingIdx <= STEP_FIELDS.indexOf('wallet')) state.walletSource = null;
+    if (landingIdx <= STEP_FIELDS.indexOf('bank')) { state.bankAccount = null; state.bankTaxId = null; }
     fetchStep();
   }
 
@@ -2058,6 +2881,11 @@ const PAGE = /* html */ `<!doctype html>
 
   function isValidStellarAddress(addr) {
     return /^G[A-Z2-7]{55}$/.test(addr || '');
+  }
+
+  /** Providers that deliver real crypto on Stellar mainnet whatever network this demo is otherwise on — mirrors deliveryTargetFor() server-side. */
+  function providerDeliversOnMainnet(provider) {
+    return !!provider && provider.indexOf('abroad') === 0;
   }
 
   /**
@@ -2149,14 +2977,19 @@ const PAGE = /* html */ `<!doctype html>
       showToast(STR('walletRequired'), 'error');
       return;
     }
-    if (state.walletSource === 'demo') {
+    // A server-held demo wallet only skips the check because settlement
+    // opens its trustline itself — which is only true for wallets this demo
+    // pays out to. A provider that delivers on mainnet does none of that, so
+    // the check still has to run (and will fail, correctly: a Friendbot
+    // testnet wallet cannot receive real USDC).
+    if (state.walletSource === 'demo' && !providerDeliversOnMainnet(state.provider)) {
       proceedPastWallet();
       return;
     }
     var btn = document.getElementById('walletContinueBtn');
     setButtonLoading(btn, true);
     try {
-      var res = await fetch('/api/checkTrustline', { method: 'POST', body: JSON.stringify({ wallet: state.wallet }) });
+      var res = await fetch('/api/checkTrustline', { method: 'POST', body: JSON.stringify({ wallet: state.wallet, provider: state.provider }) });
       var data = await res.json();
       setButtonLoading(btn, false);
       if (data.trusts) {
@@ -2208,11 +3041,11 @@ const PAGE = /* html */ `<!doctype html>
     setButtonLoading(btn, true);
     setTrustlineStatus(STR('trustlineChecking'));
     try {
-      var buildRes = await fetch('/api/trustlineTransaction', { method: 'POST', body: JSON.stringify({ wallet: state.wallet }) });
+      var buildRes = await fetch('/api/trustlineTransaction', { method: 'POST', body: JSON.stringify({ wallet: state.wallet, provider: state.provider }) });
       var buildData = await buildRes.json();
       if (buildData.error) throw new Error(buildData.error);
       var signedXdr = await window.signStellarTransaction(buildData.xdr, state.wallet, buildData.networkPassphrase);
-      var submitRes = await fetch('/api/submitTrustline', { method: 'POST', body: JSON.stringify({ xdr: signedXdr }) });
+      var submitRes = await fetch('/api/submitTrustline', { method: 'POST', body: JSON.stringify({ xdr: signedXdr, provider: state.provider }) });
       var submitData = await submitRes.json();
       if (submitData.error) throw new Error(submitData.error);
       setButtonLoading(btn, false);
@@ -2220,7 +3053,10 @@ const PAGE = /* html */ `<!doctype html>
       setTimeout(function () { closeTrustlineModal(true); }, 900);
     } catch (err) {
       setButtonLoading(btn, false);
-      setTrustlineStatus(STR('trustlineError'), 'error');
+      // Surface the real reason when the server gave one — "this account
+      // doesn't exist on mainnet yet, fund it with ~1.5 XLM" is actionable
+      // in a way that a generic failure isn't.
+      setTrustlineStatus((err && err.message) ? err.message : STR('trustlineError'), 'error');
     }
   }
 
@@ -2232,14 +3068,65 @@ const PAGE = /* html */ `<!doctype html>
       var amountInput = document.getElementById('amountInput');
       state.amount = amountInput ? Number(amountInput.value) : null;
     }
+    // Selling on a rail that pays the seller directly needs their payout
+    // account before the order can be opened — that's the next step, not the
+    // submit. Collect it, then come back here through submitBank().
+    if (op === 'sell' && needsBankFor(state.provider) && !state.bankAccount) {
+      stepIdx = STEPS[op].indexOf('bank');
+      await fetchStep();
+      return;
+    }
     var btn = document.querySelector('#view button:not(.back)');
+    await runOperation(btn);
+  }
+
+  /** Collects the payout account, then runs the sell. */
+  async function submitBank() {
+    var account = document.getElementById('bankAccountInput');
+    var taxId = document.getElementById('bankTaxIdInput');
+    state.bankAccount = account ? account.value.trim() : '';
+    state.bankTaxId = taxId ? taxId.value.trim() : '';
+    if (!state.bankAccount || !state.bankTaxId) {
+      showToast(STR('bankRequired'), 'error');
+      return;
+    }
+    await runOperation(document.querySelector('#view button:not(.back)'));
+  }
+
+  /**
+   * Runs the current operation (checkout / sell / quote) with whatever the
+   * wizard has collected.
+   *
+   * Shared by the amount step, the payout-account step and the post-KYC
+   * resume so all three land in exactly the same place — including the
+   * kycRequired answer, which isn't an error: the provider is telling us
+   * to verify the user first, so the verification step opens and this same
+   * call is replayed once they're approved.
+   */
+  async function runOperation(btn) {
     if (btn && btn.disabled) return;
     setButtonLoading(btn, true);
     var endpoint = op === 'buy' ? 'checkout' : op === 'sell' ? 'sell' : 'quote';
     try {
+      // Ask first, so verification shows up as an ordinary step rather than
+      // as the recovery from a failed payment attempt. The endpoint answers
+      // "not required" without a network call for providers that don't do KYC.
+      if (endpoint !== 'quote') {
+        var statusRes = await fetch('/api/kycStatus', { method: 'POST', body: JSON.stringify({ provider: state.provider }) });
+        var statusData = await statusRes.json();
+        if (statusData && statusData.required) {
+          setButtonLoading(btn, false);
+          openKycStep();
+          return;
+        }
+      }
+
       var res = await fetch('/api/' + endpoint, {
         method: 'POST',
-        body: JSON.stringify({ provider: state.provider, currency: state.currency, method: state.method, wallet: state.wallet, amount: state.amount, lang: lang }),
+        body: JSON.stringify({
+          provider: state.provider, currency: state.currency, method: state.method, wallet: state.wallet,
+          amount: state.amount, bankAccount: state.bankAccount, bankTaxId: state.bankTaxId, lang: lang,
+        }),
       });
       var data = await res.json();
       if (data.error) {
@@ -2247,7 +3134,14 @@ const PAGE = /* html */ `<!doctype html>
         showToast(data.error, 'error');
         return;
       }
+      // The provider decided mid-flight that this user needs verifying.
+      if (data.kycRequired) {
+        setButtonLoading(btn, false);
+        openKycStep();
+        return;
+      }
       uiMode = 'result';
+      kycResume = null;
       orderId = data.orderId || null;
       pendingKind = orderId && (op === 'buy' || op === 'sell') ? op : null;
       swapView('view', data.resultHtml);
@@ -2257,6 +3151,92 @@ const PAGE = /* html */ `<!doctype html>
       setButtonLoading(btn, false);
       showToast(STR('genericError'), 'error');
     }
+  }
+
+  /** Opens the verification step, remembering that the operation should resume once the provider approves. */
+  async function openKycStep() {
+    kycResume = op;
+    var qs = new URLSearchParams({ op: op, step: 'kyc', lang: lang, provider: state.provider || '' });
+    try {
+      var res = await fetch('/api/step?' + qs.toString());
+      var data = await res.json();
+      swapView('view', data.html);
+    } catch (err) {
+      showToast(STR('genericError'), 'error');
+    }
+  }
+
+  /** Reads a File as a base64 data URL — this demo's little HTTP server has no multipart parser, so the image travels inside the JSON body. */
+  function readFileAsDataUrl(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(reader.result); };
+      reader.onerror = function () { reject(reader.error); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /** Submits the verification form, then resumes whatever was interrupted. */
+  async function submitKyc() {
+    var btn = document.getElementById('kycSubmitBtn');
+    if (btn && btn.disabled) return;
+    var fileInput = document.getElementById('kycDocument');
+    var file = fileInput && fileInput.files && fileInput.files[0];
+    var fields = ['fullName', 'documentType', 'documentNumber', 'dateOfBirth', 'nationality', 'city', 'address', 'email', 'phone'];
+    var payload = { provider: state.provider };
+    for (var i = 0; i < fields.length; i++) {
+      var el = document.getElementById('kyc' + fields[i].charAt(0).toUpperCase() + fields[i].slice(1));
+      var value = el ? String(el.value || '').trim() : '';
+      if (!value) { showToast(STR('kycRequiredFields'), 'error'); return; }
+      payload[fields[i]] = value;
+    }
+    if (!file) { showToast(STR('kycRequiredFields'), 'error'); return; }
+
+    setButtonLoading(btn, true);
+    setKycNote(STR('kycChecking'), '');
+    try {
+      payload.document = await readFileAsDataUrl(file);
+      var res = await fetch('/api/submitKyc', { method: 'POST', body: JSON.stringify(payload) });
+      var data = await res.json();
+      setButtonLoading(btn, false);
+      if (data.error) { setKycNote('', ''); showToast(data.error, 'error'); return; }
+      if (data.approved) {
+        setKycNote(STR('kycApproved'), '#16A34A');
+        kycResume = null;
+        // Straight back into the operation the user was already committed to.
+        setTimeout(function () { runOperation(null); }, 700);
+        return;
+      }
+      setKycNote(data.status === 'REJECTED' ? STR('kycRejected') : STR('kycPending'), '#B45309');
+    } catch (err) {
+      setButtonLoading(btn, false);
+      setKycNote('', '');
+      showToast(STR('genericError'), 'error');
+    }
+  }
+
+  function setKycNote(message, color) {
+    var el = document.getElementById('kycStatusNote');
+    if (!el) return;
+    el.textContent = message || '';
+    el.style.color = color || 'var(--muted)';
+  }
+
+  /** Quote result → the buy flow, carrying provider/currency/amount so the user doesn't re-enter what they just quoted. */
+  function proceedFromQuote() {
+    op = 'buy';
+    uiMode = 'wizard';
+    stepIdx = STEPS.buy.indexOf('wallet');
+    state.method = methodsFor(state.provider, state.currency)[0];
+    document.getElementById('actions').innerHTML = '';
+    fetchStep();
+  }
+
+  /** Quote result → back to the amount step, with the amount preserved. */
+  function backToQuoteAmount() {
+    uiMode = 'wizard';
+    stepIdx = STEPS[op].indexOf('amount');
+    fetchStep();
   }
 
   /** "Test" mode's manual mark-as-complete control — forces the payment/crypto-received simulation immediately instead of waiting on the 5s poll. */
@@ -2329,10 +3309,13 @@ const PAGE = /* html */ `<!doctype html>
       menu.classList.remove('open');
       return;
     }
+    // Production is buy-only (see SELL_ENABLED server-side) — the sell entry
+    // is dropped rather than shown and rejected. /api/sell refuses too;
+    // this is presentation, not the control.
     menu.innerHTML =
       '<div class="menu-label">' + STR('chooseOperation') + '</div>' +
       '<button class="' + (op === 'buy' ? 'current' : '') + '" onclick="chooseOp(\\'buy\\')">' + STR('opBuy') + '</button>' +
-      '<button class="' + (op === 'sell' ? 'current' : '') + '" onclick="chooseOp(\\'sell\\')">' + STR('opSell') + '</button>' +
+      (SELL_ENABLED ? '<button class="' + (op === 'sell' ? 'current' : '') + '" onclick="chooseOp(\\'sell\\')">' + STR('opSell') + '</button>' : '') +
       '<button class="' + (op === 'quote' ? 'current' : '') + '" onclick="chooseOp(\\'quote\\')">' + STR('opQuote') + '</button>' +
       '<div class="menu-divider"></div>' +
       '<div class="menu-label">' + STR('confirmationMode') + '</div>' +
@@ -2342,13 +3325,15 @@ const PAGE = /* html */ `<!doctype html>
   }
 
   function chooseOp(next) {
+    if (next === 'sell' && !SELL_ENABLED) { showToast(STR('sellUnavailableProd'), 'error'); return; }
     op = next;
     stepIdx = 0;
     uiMode = 'wizard';
     orderId = null;
     pendingKind = null;
+    kycResume = null;
     stopPolling();
-    state = { provider: null, currency: null, method: null, wallet: null, walletSource: null, amount: null };
+    state = { provider: null, currency: null, method: null, wallet: null, walletSource: null, amount: null, bankAccount: null, bankTaxId: null };
     document.getElementById('actions').innerHTML = '';
     document.getElementById('fab-menu').classList.remove('open');
     fetchStep();
@@ -2395,3 +3380,9 @@ const PAGE = /* html */ `<!doctype html>
 </script>
 </body>
 </html>`;
+
+// Everything above is now initialized — including PAGE — so it's safe to
+// accept requests. See the note next to the server definition.
+server.listen(PORT, () => {
+  console.log(`Demo UI running → http://localhost:${PORT}`);
+});

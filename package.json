@@ -17,12 +17,26 @@
     "latam",
     "etherfuse",
     "koywe",
+    "abroad",
+    "breb",
     "stellar",
     "sep-24",
     "sep-10"
   ],
   "license": "MIT",
   "author": "Cosmos",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Emanuel250YT/Cosmos-Provider.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Emanuel250YT/Cosmos-Provider/issues"
+  },
+  "homepage": "https://github.com/Emanuel250YT/Cosmos-Provider#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.cjs",
@@ -70,6 +84,7 @@
     "flow:etherfuse:quickstart": "tsx examples/etherfuse/quickstart.ts",
     "flow:mercadopago:link": "tsx examples/mercadopago/payment-link.ts",
     "flow:mercadopago:pix": "tsx examples/mercadopago/pix.ts",
+    "flow:abroad": "tsx examples/abroad/quickstart.ts",
     "flow:koywe": "tsx examples/koywe/full-flow.ts",
     "flow:sep": "tsx examples/sep/full-flow.ts",
     "flow:all": "tsx examples/all-flows.ts",

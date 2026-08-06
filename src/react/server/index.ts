@@ -18,6 +18,7 @@ export type { QrRenderOptions } from "./qr";
 export {
   quoteToSummaryRows,
   rampOrderToDetailRows,
+  offrampDepositToDetailRows,
   chargeToQrProps,
   depositInstructionsToQrProps,
   apiOrderToDetailRows,
