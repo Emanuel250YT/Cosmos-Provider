@@ -9,12 +9,32 @@ export interface PaymentConfirmationProps {
   rows: Array<DetailRowProps>;
   /** Provider/item logo shown in the header circle — a striped placeholder when omitted. */
   logoUrl?: string;
+  /**
+   * Text the Share button hands off — defaults to `${itemTitle} — ${itemSubtitle}`.
+   * Also set as `data-share-text` on the button itself (see `onShare`'s docstring)
+   * so a page with no React hydration can still wire up a real share action.
+   */
+  shareText?: string;
+  /**
+   * Called on click, for a hydrated React app that wants to run its own share
+   * logic (e.g. `navigator.share(...)`). For a page rendered with
+   * `renderToStaticMarkup` and no hydration (`onClick` never attaches, there's
+   * no JS runtime backing this tree), the button ALSO carries
+   * `data-cosmos-action="share"` and `data-share-text="..."` — wire up a
+   * delegated listener wherever this is mounted, e.g.:
+   * `document.addEventListener('click', (e) => { const btn =
+   * e.target.closest('[data-cosmos-action="share"]'); if (btn &&
+   * navigator.share) navigator.share({ text: btn.dataset.shareText }); })`.
+   */
   onShare?: () => void;
+  /** Same idea as `onShare`, but for a "Print" button carrying `data-cosmos-action="print"` — a delegated listener can just call `window.print()`. */
+  onPrint?: () => void;
   locale?: Locale;
 }
 
-/** "Payment success" summary card with a share action. */
-export function PaymentConfirmation({ itemTitle, itemSubtitle, rows, logoUrl, onShare, locale = "en" }: PaymentConfirmationProps) {
+/** "Payment success" summary card with Print and Share actions. */
+export function PaymentConfirmation({ itemTitle, itemSubtitle, rows, logoUrl, shareText, onShare, onPrint, locale = "en" }: PaymentConfirmationProps) {
+  const resolvedShareText = shareText ?? `${itemTitle} — ${itemSubtitle}`;
   return (
     <div style={{ ...screenCardStyle, fontFamily: "Helvetica, Arial, sans-serif", background: "var(--cosmos-bg-soft, #F7F7F8)", borderRadius: 24, paddingBottom: 24, color: "var(--cosmos-fg, #111827)" }}>
       <div style={{ padding: "16px 20px" }}>
@@ -68,18 +88,38 @@ export function PaymentConfirmation({ itemTitle, itemSubtitle, rows, logoUrl, on
         </div>
       </div>
 
-      <div style={{ padding: "0 20px" }}>
+      <div className="cosmos-no-print" style={{ padding: "0 20px", display: "flex", gap: 10 }}>
+        <button
+          type="button"
+          onClick={onPrint}
+          data-cosmos-action="print"
+          style={{
+            flex: 1,
+            background: "var(--cosmos-surface-alt, #F3F4F6)",
+            color: "var(--cosmos-fg, #111827)",
+            border: "none",
+            borderRadius: 16,
+            padding: 16,
+            fontSize: 15,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          {t(locale, "print")}
+        </button>
         <button
           type="button"
           onClick={onShare}
+          data-cosmos-action="share"
+          data-share-text={resolvedShareText}
           style={{
-            width: "100%",
+            flex: 1,
             background: "var(--cosmos-button-bg, #111827)",
             color: "var(--cosmos-button-fg, #fff)",
             border: "none",
             borderRadius: 16,
             padding: 16,
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: 700,
             cursor: "pointer",
           }}

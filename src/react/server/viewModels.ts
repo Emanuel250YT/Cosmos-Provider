@@ -62,11 +62,11 @@ export function quoteToSummaryRows(quote: QuoteBreakdown): SummaryRowProps[] {
 export function rampOrderToDetailRows(order: RampOrderData, options?: { settlementTxUrl?: (txId: string) => string | undefined }): DetailRowProps[] {
   const rows: DetailRowProps[] = [
     { label: "Order ID", value: order.id },
-    { label: "Status", value: order.status, valueColor: STATUS_COLOR[order.status] ?? "var(--cosmos-fg, #111827)" },
-    { label: "Provider", value: order.provider },
+    { label: "Status", value: order.status, valueColor: STATUS_COLOR[order.status] ?? "var(--cosmos-fg, #111827)", capitalize: true },
+    { label: "Provider", value: order.provider, capitalize: true },
   ];
   if (order.chargeId) rows.push({ label: "Payment ID", value: order.chargeId });
-  if (order.charge?.method) rows.push({ label: "Method", value: order.charge.method });
+  if (order.charge?.method) rows.push({ label: "Method", value: order.charge.method, capitalize: true });
   if (order.settlementTxId) rows.push({ label: "Settlement Tx", value: order.settlementTxId, href: options?.settlementTxUrl?.(order.settlementTxId), copyable: true });
   rows.push({ label: "Created", value: new Date(order.createdAt).toLocaleString() });
   return rows;
@@ -97,7 +97,7 @@ export async function depositInstructionsToQrProps(deposit: DepositInstructions,
 /** Transaction-detail rows for an Etherfuse `APIOrder` (onramp/offramp). */
 export function apiOrderToDetailRows(order: APIOrder): DetailRowProps[] {
   const rows: DetailRowProps[] = [{ label: "Order ID", value: order.orderId }];
-  if (order.status) rows.push({ label: "Status", value: order.status, valueColor: STATUS_COLOR[order.status] ?? "var(--cosmos-fg, #111827)" });
+  if (order.status) rows.push({ label: "Status", value: order.status, valueColor: STATUS_COLOR[order.status] ?? "var(--cosmos-fg, #111827)", capitalize: true });
   if (order.sourceAsset && order.targetAsset) rows.push({ label: "Pair", value: `${order.sourceAsset} → ${order.targetAsset}` });
   if (order.amountInFiat) rows.push({ label: "Amount", value: order.amountInFiat });
   if (order.exchangeRate) rows.push({ label: "Rate", value: order.exchangeRate });

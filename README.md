@@ -190,6 +190,13 @@ npm run demo      # console runner: quote → link → QR → webhook → auto U
 npm run demo:ui   # web playground at http://localhost:4000 with one button per action
 ```
 
+`demo:ui` has two modes, picked by which `.env` file it loads — copy the matching `.example` to get started:
+
+```bash
+cp .env.test.example .env.test              # npm run demo:ui      — sandbox, ALWAYS (Mercado Pago can never place a real charge here)
+cp .env.production.example .env.production   # npm run demo:ui:prod — reads MP_SANDBOX from that file; set it to "false" only when you actually mean to place a real, chargeable preference
+```
+
 ## Mercado Pago
 
 `cosmos.mercadopago` is a `MercadoPagoProvider` — one merchant account (or several, one per country) with two genuinely different ways to collect money:

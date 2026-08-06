@@ -74,7 +74,8 @@
     "flow:sep": "tsx examples/sep/full-flow.ts",
     "flow:all": "tsx examples/all-flows.ts",
     "demo": "tsx examples/mercadopago/settlement-demo.ts",
-    "demo:ui": "tsx examples/mercadopago/demo-ui.tsx",
+    "demo:ui": "tsx examples/mercadopago/demo-ui.tsx --env=test",
+    "demo:ui:prod": "tsx examples/mercadopago/demo-ui.tsx --env=production",
     "prepublishOnly": "npm run typecheck && npm run build && npm run test"
   },
   "dependencies": {

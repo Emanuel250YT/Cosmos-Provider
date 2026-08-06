@@ -48,6 +48,7 @@ const en = {
   paymentSuccess: "Payment Success!",
   paymentDoneMessage: "Your payment has been successfully done",
   share: "Share",
+  print: "Print",
 
   // PaymentForm
   order: "Order",
@@ -140,6 +141,7 @@ const es: Record<keyof typeof en, string> = {
   paymentSuccess: "¡Pago exitoso!",
   paymentDoneMessage: "Tu pago se realizó correctamente",
   share: "Compartir",
+  print: "Imprimir",
 
   order: "Pedido",
   time: "Hora",
@@ -225,6 +227,7 @@ const pt: Record<keyof typeof en, string> = {
   paymentSuccess: "Pagamento realizado!",
   paymentDoneMessage: "Seu pagamento foi concluído com sucesso",
   share: "Compartilhar",
+  print: "Imprimir",
 
   order: "Pedido",
   time: "Horário",

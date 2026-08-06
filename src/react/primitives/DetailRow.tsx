@@ -20,6 +20,16 @@ export interface DetailRowProps {
    * identically whether the page hydrates or not.
    */
   copyable?: boolean;
+  /**
+   * Renders `value` with each word's first letter capitalized (e.g. a raw
+   * status like "settling" → "Settling") — for words, not for opaque ids:
+   * leave this off for anything like `order.id`, a charge id, or a tx hash,
+   * where capitalization would just be noise (or actively wrong — hex
+   * strings and UUIDs aren't case-normalized). Purely a display transform
+   * (CSS `text-transform`); `value` itself, and whatever `copyable` copies,
+   * are unaffected.
+   */
+  capitalize?: boolean;
 }
 
 /** `abcd1234…ef567890` — first/last 6 chars, only when that's actually shorter than the original. */
@@ -27,10 +37,10 @@ function truncateMiddle(value: string): string {
   return value.length > 16 ? `${value.slice(0, 6)}…${value.slice(-6)}` : value;
 }
 
-/** A label/value line for a transaction detail sheet (status, date, id...). `value` renders as a link when `href` is set, truncated with a copy button when `copyable` is set. */
-export function DetailRow({ label, value, valueColor = "var(--cosmos-fg, #111827)", href, copyable = false }: DetailRowProps) {
+/** A label/value line for a transaction detail sheet (status, date, id...). `value` renders as a link when `href` is set, truncated with a copy button when `copyable` is set, capitalized when `capitalize` is set — always right-aligned against `label`. */
+export function DetailRow({ label, value, valueColor = "var(--cosmos-fg, #111827)", href, copyable = false, capitalize = false }: DetailRowProps) {
   const displayValue = copyable ? truncateMiddle(value) : value;
-  const valueStyle = { fontSize: 14, fontWeight: 600, color: valueColor };
+  const valueStyle = { fontSize: 14, fontWeight: 600, color: valueColor, textTransform: capitalize ? ("capitalize" as const) : undefined };
 
   return (
     <div
@@ -44,7 +54,7 @@ export function DetailRow({ label, value, valueColor = "var(--cosmos-fg, #111827
       }}
     >
       <span style={{ fontSize: 14, color: "var(--cosmos-muted, #9CA3AF)" }}>{label}</span>
-      <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, textAlign: "right" }}>
         {href ? (
           <a href={href} target="_blank" rel="noopener noreferrer" title={copyable ? value : undefined} style={{ ...valueStyle, textDecoration: "underline", textUnderlineOffset: 2 }}>
             {displayValue}

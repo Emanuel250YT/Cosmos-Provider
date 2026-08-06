@@ -9,25 +9,35 @@
  * Steps animate in/out; the language dropdown (top-right, flags) and the
  * light/dark toggle next to it re-render the wizard's own copy.
  *
- *   npm run demo:ui     (or: npx tsx examples/mercadopago/demo-ui.tsx)
- *   → open http://localhost:4000
+ *   npm run demo:ui         (test mode  → loads .env.test,       MP sandbox forced on)
+ *   npm run demo:ui:prod    (production → loads .env.production, MP sandbox from MP_SANDBOX)
+ *   → open http://localhost:4000 (test) or :4001 (production) — see PORT below;
+ *     override either with a PORT env var
  *
  * Three providers are registered by default — `EtherfuseProvider`,
  * `MercadoPagoProvider` (BR) and `MercadoPagoProvider` (AR), each with a
  * `logoUrl` — reusing `ramp.providers` for the picker means adding a fourth
  * is the only change needed anywhere.
  *
- * Both Mercado Pago accounts (BR, AR) are always constructed with
- * `sandbox: true` (see `buildMercadoPago`) — this is a *public* demo, so it
- * can never place a genuine, chargeable production preference, no matter
- * what `MP_*_ACCESS_TOKEN` ends up in `.env`. Each account uses that real
- * token against the sandbox when `.env` sets one, and only falls back to the
- * local, in-memory simulator (`examples/helpers/mock-mercadopago`,
- * safe/deterministic/no external calls) when that env var is absent.
- * Etherfuse always talks to its real sandbox API (no mock exists for it)
- * regardless. `mockBackedProviders` tracks which provider names are on the
- * local simulator, so `confirmOrder` knows whether it's safe to fake a
- * payment (mock) or must genuinely check status (real sandbox).
+ * WHICH .env FILE, AND SANDBOX VS. REAL CHARGES — both come from ONE choice,
+ * `--env=test` (default, `npm run demo:ui`) or `--env=production`
+ * (`npm run demo:ui:prod`), read below before anything else runs:
+ *   - `--env=test` loads `.env.test` — safe by construction: Mercado Pago is
+ *     forced `sandbox: true` (see `buildMercadoPago`) no matter what's in
+ *     that file, so this mode can NEVER place a real, chargeable preference.
+ *   - `--env=production` loads `.env.production` and reads `MP_SANDBOX` from
+ *     it to decide `sandbox: true/false` — set `MP_SANDBOX="false"` there to
+ *     let this demo place REAL, genuinely chargeable Mercado Pago
+ *     preferences with your real account. Documented in
+ *     `.env.production.example`. Know what you're testing against.
+ * Each Mercado Pago account uses its real `MP_*_ACCESS_TOKEN` when the
+ * loaded file sets one, and only falls back to the local, in-memory
+ * simulator (`examples/helpers/mock-mercadopago`, safe/deterministic/no
+ * external calls) when that env var is absent. Etherfuse always talks to its
+ * real sandbox API (no mock exists for it) regardless of `--env`.
+ * `mockBackedProviders` tracks which provider names are on the local
+ * simulator, so `confirmOrder` knows whether it's safe to fake a payment
+ * (mock) or must genuinely check status (sandbox or real).
  *
  * Once an order is created, the page polls `/api/status` (a pure read —
  * no side effects) every 5s waiting for it to land as `completed`, same as
@@ -55,7 +65,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
-import "dotenv/config";
+import { config as loadEnv } from "dotenv";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset as StellarAsset, BASE_FEE } from "@stellar/stellar-sdk";
 import {
@@ -73,7 +83,32 @@ import { ReceivePayment, PaymentConfirmation, PaymentMethodCard, PaymentOptionRo
 import { chargeToQrProps, rampOrderToDetailRows, quoteToSummaryRows, renderQrDataUrl } from "../../src/react/server";
 import { createMockMercadoPago } from "../helpers/mock-mercadopago";
 
-const PORT = 4000;
+// ---------------------------------------------------------------------------
+// --env=test (default) | --env=production — picks which .env file this demo
+// loads, BEFORE anything below reads process.env. See this file's top
+// docstring and .env.test.example/.env.production.example for what each one
+// means (in particular: whether Mercado Pago can place real charges).
+// ---------------------------------------------------------------------------
+const envFlag = process.argv.find((arg) => arg.startsWith("--env="));
+const DEMO_ENV = envFlag ? envFlag.slice("--env=".length) : "test";
+if (DEMO_ENV !== "test" && DEMO_ENV !== "production") {
+  console.error(`Unknown --env=${DEMO_ENV} — expected "test" or "production".`);
+  process.exit(1);
+}
+const ENV_FILE = `.env.${DEMO_ENV}`;
+const envResult = loadEnv({ path: ENV_FILE });
+if (envResult.error) {
+  console.warn(`⚠ Could not load ${ENV_FILE} (${(envResult.error as Error).message}) — continuing with whatever's already in the environment. Copy .env.${DEMO_ENV}.example to get started.`);
+} else {
+  console.log(`Loaded ${ENV_FILE} (--env=${DEMO_ENV})`);
+}
+/** Whether Mercado Pago runs in sandbox mode — ALWAYS true in test mode, regardless of `.env.test`'s content; only production mode reads `MP_SANDBOX` (default true — must be explicitly set to "false" to place real charges). See buildMercadoPago below. */
+const MP_SANDBOX = DEMO_ENV === "test" ? true : (process.env.MP_SANDBOX ?? "true") !== "false";
+
+// Production defaults to a different port than test so both can run at the
+// same time (e.g. comparing sandbox vs. real behavior side by side) — override
+// either with a PORT env var (also settable from the loaded .env file itself).
+const PORT = process.env.PORT ? Number(process.env.PORT) : DEMO_ENV === "production" ? 4001 : 4000;
 const WEBHOOK_SECRET = "demo-mp-secret";
 
 type Op = "buy" | "sell" | "quote";
@@ -350,10 +385,40 @@ function getWalletKitBundle(): Promise<string> {
 const stellarServer = new Horizon.Server("https://horizon-testnet.stellar.org");
 const mp = createMockMercadoPago({ webhookSecret: WEBHOOK_SECRET });
 
-console.log("Funding a Stellar testnet demo-USDC issuer (Friendbot)...");
 // Doubles as the "treasury": the account that issues an asset can send it
 // directly, with no trustline of its own — issuing IS just a payment.
-const issuer = Keypair.random();
+//
+// Defaults to a fresh, throwaway keypair every server start (simplest for a
+// one-off demo run) — but that means every restart mints a DIFFERENT USDC
+// (same code, different issuer = a different Stellar asset), so anything
+// released by a previous run becomes worthless, and any pre-funded balance
+// on that old issuer is gone. Set STELLAR_ISSUER_SECRET in `.env` to reuse
+// the SAME issuer account across restarts instead — one real testnet secret
+// key (e.g. from `Keypair.random().secret()` or Stellar Laboratory's
+// "Generate keypair"), funded once. Never a mainnet secret; this signs real
+// (if testnet-only) payments on every settlement.
+function loadIssuerKeypair(): Keypair {
+  const secret = process.env.STELLAR_ISSUER_SECRET?.trim();
+  if (!secret) return Keypair.random();
+  try {
+    return Keypair.fromSecret(secret);
+  } catch (error) {
+    // Keypair.fromSecret is strict (StrKey format + checksum) and throws on
+    // anything else — a public key pasted by mistake, a non-Stellar string,
+    // truncated copy/paste, etc. Fail loudly with a clear, actionable
+    // message here instead of letting that exception bubble up as an opaque
+    // Stellar SDK stack trace (or, worse, silently falling back to a random
+    // issuer — that would look like it "took" when it didn't).
+    console.error(
+      `✘ STELLAR_ISSUER_SECRET in .env.${DEMO_ENV} is not a valid Stellar secret key (${String((error as Error).message ?? error)}).\n` +
+        `  It must start with "S" and be 56 characters — generate one with:\n` +
+        `  node -e "console.log(require('@stellar/stellar-sdk').Keypair.random().secret())"`,
+    );
+    process.exit(1);
+  }
+}
+const issuer = loadIssuerKeypair();
+const ISSUER_SOURCE = process.env.STELLAR_ISSUER_SECRET?.trim() ? `from STELLAR_ISSUER_SECRET in .env.${DEMO_ENV}` : "random — set STELLAR_ISSUER_SECRET to reuse the same one across restarts";
 // Matches CosmosRamp's default `defaults.asset` ("USDC") — neither ramp
 // instance below overrides it, so every order settles in this asset.
 const DEMO_ASSET_CODE = "USDC";
@@ -365,11 +430,21 @@ const DEMO_ASSET_CODE = "USDC";
 const walletByAddress = new Map<string, Keypair>();
 let stellarReady = false;
 try {
-  await stellarServer.friendbot(issuer.publicKey()).call();
+  // Already funded (a reused STELLAR_ISSUER_SECRET from a prior run) — skip
+  // Friendbot entirely; calling it on an account that already exists just
+  // errors (`createAccount` fails if the destination already exists).
+  await stellarServer.loadAccount(issuer.publicKey());
   stellarReady = true;
-  console.log(`✔ Demo USDC issuer funded: ${issuer.publicKey()}`);
-} catch (error) {
-  console.warn("⚠ Could not reach Stellar testnet/Friendbot — settlement will fall back to a simulated tx id:", error);
+  console.log(`✔ Demo USDC issuer already funded: ${issuer.publicKey()} (${ISSUER_SOURCE})`);
+} catch {
+  console.log(`Funding a Stellar testnet demo-USDC issuer (Friendbot)... (${ISSUER_SOURCE})`);
+  try {
+    await stellarServer.friendbot(issuer.publicKey()).call();
+    stellarReady = true;
+    console.log(`✔ Demo USDC issuer funded: ${issuer.publicKey()} (${ISSUER_SOURCE})`);
+  } catch (error) {
+    console.warn("⚠ Could not reach Stellar testnet/Friendbot — settlement will fall back to a simulated tx id:", error);
+  }
 }
 
 /**
@@ -509,11 +584,11 @@ const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "https://stellarsummit.l
 const mockBackedProviders = new Set<string>();
 
 /**
- * A Mercado Pago account: real credentials from `.env` when set, else the
- * local simulator (fake payments allowed — tracked in `mockBackedProviders`).
- * Always constructed with `sandbox: true` — same as payment-link.ts/pix.ts —
- * so this public demo can never place a genuine, chargeable production
- * preference no matter what token ends up in `.env`.
+ * A Mercado Pago account: real credentials from the loaded .env file when
+ * set, else the local simulator (fake payments allowed — tracked in
+ * `mockBackedProviders`). `sandbox` comes from `MP_SANDBOX` (see the top of
+ * this file) — ALWAYS `true` in test mode (`--env=test`) no matter what,
+ * only production mode can flip it to `false` and place a real charge.
  */
 function buildMercadoPago(name: string, region: string, currency: FiatCurrency, envToken: string | undefined, envWebhookSecret: string | undefined): MercadoPagoProvider {
   if (envToken) {
@@ -522,7 +597,7 @@ function buildMercadoPago(name: string, region: string, currency: FiatCurrency, 
       regions: [region],
       currencies: [currency],
       accessToken: envToken,
-      sandbox: true,
+      sandbox: MP_SANDBOX,
       webhookSecret: envWebhookSecret,
       notificationUrl: `${PUBLIC_BASE_URL}/webhooks/${name}`,
       defaultPayerEmail: "buyer@example.com",
@@ -559,6 +634,7 @@ function isMockBacked(providerName: string): boolean {
 console.log(
   `Providers: ${ramp.providers.map((p) => (isMockBacked(p.name) ? p.name : `${p.name} (REAL)`)).join(", ")}`,
 );
+console.log(`Mercado Pago mode: ${MP_SANDBOX ? "sandbox — no real charges possible" : "⚠ PRODUCTION — real, chargeable preferences"}`);
 for (const name of [mercadoPagoBr.name, mercadoPagoAr.name]) {
   if (!isMockBacked(name)) console.log(`Webhook notification URL for ${name}: ${PUBLIC_BASE_URL}/webhooks/${name}`);
 }
@@ -774,6 +850,17 @@ function renderSellPending(order: RampOrderData, lang: Lang): string {
 }
 
 /** The receipt shown once an order is paid and settled. */
+/** Plain-text summary for the receipt's Share button — amount, order id, and the settlement tx (as a Stellar Expert link when it's a real one). */
+function receiptShareText(order: RampOrderData): string {
+  const amountLine =
+    order.direction === "onramp"
+      ? `${order.quote.fiatAmount.toFixed(2)} ${order.quote.currency} → ${order.quote.cryptoAmount} ${order.quote.asset}`
+      : `${order.quote.cryptoAmount} ${order.quote.asset} → ${order.quote.fiatAmount.toFixed(2)} ${order.quote.currency}`;
+  const lines = [`${order.direction === "onramp" ? "Buy" : "Sell"} USDC · ${order.provider}`, amountLine, `Order ${order.id}`];
+  if (order.settlementTxId) lines.push(`Tx: ${stellarExpertTxUrl(order.settlementTxId) ?? order.settlementTxId}`);
+  return lines.join("\n");
+}
+
 function renderReceipt(order: RampOrderData): string {
   const logoUrl = ramp.providers.find((p) => p.name === order.provider)?.logoUrl;
   return renderToStaticMarkup(
@@ -781,6 +868,7 @@ function renderReceipt(order: RampOrderData): string {
       itemTitle={`${order.direction === "onramp" ? "Buy" : "Sell"} USDC · ${order.provider}`}
       itemSubtitle={new Date(order.updatedAt).toLocaleString()}
       logoUrl={logoUrl}
+      shareText={receiptShareText(order)}
       rows={rampOrderToDetailRows(order, { settlementTxUrl: stellarExpertTxUrl })}
     />,
   );
@@ -1275,6 +1363,12 @@ const PAGE = /* html */ `<!doctype html>
   @keyframes viewLeave { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-8px) scale(.98); } }
   #view > *, #actions > * { animation: viewEnter .3s cubic-bezier(.16,1,.3,1) both; }
   #view > *.leaving, #actions > *.leaving { animation: viewLeave .15s ease both !important; }
+
+  /* The receipt's Print button (data-cosmos-action="print" in PaymentConfirmation.tsx) — show just the receipt card, not the rest of the wizard chrome. */
+  @media print {
+    #top-right, #fab-wrap, #toast-stack, #trustline-backdrop, #actions, .cosmos-no-print { display: none !important; }
+    body { padding: 0; background: #fff; }
+  }
 </style>
 </head>
 <body>
@@ -1849,6 +1943,26 @@ const PAGE = /* html */ `<!doctype html>
       }).catch(function () {
         showToast(STR('genericError'), 'error');
       });
+    }
+    // Same story as the copy button above — PaymentConfirmation.tsx's Print
+    // and Share buttons are plain data-cosmos-action="..." markers for
+    // exactly this reason (no hydration here to back a real onClick).
+    var printBtn = e.target.closest && e.target.closest('[data-cosmos-action="print"]');
+    if (printBtn) window.print();
+    var shareBtn = e.target.closest && e.target.closest('[data-cosmos-action="share"]');
+    if (shareBtn) {
+      var shareText = shareBtn.getAttribute('data-share-text') || '';
+      if (navigator.share) {
+        navigator.share({ text: shareText }).catch(function () {
+          // Cancelled or blocked by the browser — not an error worth surfacing.
+        });
+      } else {
+        navigator.clipboard.writeText(shareText).then(function () {
+          showToast(STR('copiedToClipboard'), 'success');
+        }).catch(function () {
+          showToast(STR('genericError'), 'error');
+        });
+      }
     }
   });
 </script>
