@@ -1,10 +1,10 @@
 /**
- * cosmos-providers/webhooks — verificación de firmas de webhooks de Etherfuse.
+ * cosmos-providers/webhooks — verifies Etherfuse webhook signatures.
  *
- * Solo backend (usa node:crypto). Etherfuse firma cada webhook con
- * HMAC-SHA256 sobre el JSON canonicalizado según RFC 8785 (JCS) y lo envía en
- * la cabecera `X-Signature: sha256={hex}`. El secreto llega en base64 al
- * crear el webhook (una sola vez).
+ * Backend only (uses node:crypto). Etherfuse signs each webhook with
+ * HMAC-SHA256 over the JSON canonicalized per RFC 8785 (JCS) and sends it in
+ * the `X-Signature: sha256={hex}` header. The secret arrives in base64 when
+ * the webhook is created (only once).
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -14,12 +14,12 @@ import type { WebhookEvent } from "@/types/index";
 export { WebhookVerificationError };
 export type { WebhookEvent };
 
-/** Cabecera donde Etherfuse envía la firma. */
+/** Header Etherfuse sends the signature in. */
 export const SIGNATURE_HEADER = "x-signature";
 
 /**
- * Canonicalización JSON según RFC 8785 (JCS): claves ordenadas, sin espacios.
- * Los números que produce JSON.parse serializan igual que exige JCS.
+ * JSON canonicalization per RFC 8785 (JCS): sorted keys, no whitespace.
+ * The numbers JSON.parse produces serialize exactly as JCS requires.
  */
 export function canonicalize(value: unknown): string {
   if (value === null || typeof value === "number" || typeof value === "boolean") {
@@ -36,19 +36,19 @@ export function canonicalize(value: unknown): string {
       .map(([k, v]) => `${JSON.stringify(k)}:${canonicalize(v)}`);
     return `{${entries.join(",")}}`;
   }
-  throw new WebhookVerificationError(`Valor no serializable en el payload: ${typeof value}`);
+  throw new WebhookVerificationError(`Non-serializable value in payload: ${typeof value}`);
 }
 
 export interface VerifySignatureOptions {
-  /** Cuerpo del webhook: string crudo u objeto ya parseado. */
+  /** Webhook body: raw string or an already-parsed object. */
   body: string | object;
-  /** Valor de la cabecera `X-Signature` (formato `sha256={hex}`). */
+  /** Value of the `X-Signature` header (format `sha256={hex}`). */
   signature: string | null | undefined;
-  /** Secreto del webhook, en base64 (tal cual lo devolvió la API al crearlo). */
+  /** Webhook secret, in base64 (exactly as returned by the API on creation). */
   secret: string;
 }
 
-/** Devuelve `true` si la firma es válida. Comparación en tiempo constante. */
+/** Returns `true` if the signature is valid. Constant-time comparison. */
 export function verifySignature({ body, signature, secret }: VerifySignatureOptions): boolean {
   if (!signature) return false;
 
@@ -73,8 +73,8 @@ export function verifySignature({ body, signature, secret }: VerifySignatureOpti
 }
 
 /**
- * Verifica la firma y devuelve el evento parseado y tipado.
- * Lanza {@link WebhookVerificationError} si la firma no es válida.
+ * Verifies the signature and returns the parsed, typed event.
+ * Throws {@link WebhookVerificationError} if the signature is invalid.
  *
  * ```ts
  * app.post("/webhooks/etherfuse", express.raw({ type: "application/json" }), (req, res) => {
@@ -90,7 +90,7 @@ export function constructEvent<T extends WebhookEvent = WebhookEvent>(
   secret: string,
 ): T {
   if (!verifySignature({ body, signature, secret })) {
-    throw new WebhookVerificationError("Firma de webhook inválida.");
+    throw new WebhookVerificationError("Invalid webhook signature.");
   }
   return (typeof body === "string" ? JSON.parse(body) : body) as T;
 }

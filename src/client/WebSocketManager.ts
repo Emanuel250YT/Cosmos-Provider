@@ -1,10 +1,10 @@
 /**
  * WebSocket gateway for live order events.
  *
- * Flujo: POST /ramp/ws-api-token → token de un solo uso (expira en 30 s) →
- * wss://.../ramp/ws?token=... (query param porque el navegador no puede poner
- * Authorization en el upgrade). Cada frame `order_updated` se re-lee vía REST
- * para obtener el estado autoritativo antes de emitir el evento.
+ * Flow: POST /ramp/ws-api-token → single-use token (expires in 30s) →
+ * wss://.../ramp/ws?token=... (query param because the browser can't set
+ * Authorization on the upgrade). Every `order_updated` frame is re-read via REST
+ * to get the authoritative status before emitting the event.
  */
 
 import { Routes } from "@/atoms/constants";
@@ -12,7 +12,7 @@ import { EtherfuseError } from "@/atoms/errors";
 import type { EtherfuseClient } from "@/client/EtherfuseClient";
 import type { Order } from "@/molecules/Order";
 
-/** Subconjunto mínimo de la interfaz WebSocket (DOM o paquete `ws`). */
+/** Minimal subset of the WebSocket interface (DOM or `ws` package). */
 export interface WebSocketLike {
   addEventListener(type: string, listener: (event: never) => void): void;
   close(code?: number, reason?: string): void;
@@ -22,9 +22,9 @@ export interface WebSocketLike {
 export type WebSocketConstructorLike = new (url: string) => WebSocketLike;
 
 export interface OrderUpdatedPayload {
-  /** Id de la orden que cambió, tal como vino en el frame del WebSocket. */
+  /** Id of the order that changed, as it came in the WebSocket frame. */
   orderId: string;
-  /** Orden re-leída vía REST; `null` si la hidratación falló o está desactivada. */
+  /** Order re-read via REST; `null` if hydration failed or is disabled. */
   order: Order | null;
 }
 
@@ -39,12 +39,12 @@ export class WebSocketManager {
     this.#client = client;
   }
 
-  /** `true` si el socket está abierto (`readyState === 1`, `OPEN` en la spec de WebSocket). */
+  /** `true` if the socket is open (`readyState === 1`, `OPEN` in the WebSocket spec). */
   get connected(): boolean {
     return this.#socket !== null && this.#socket.readyState === 1;
   }
 
-  /** Abre la conexión al stream de actualizaciones en vivo. */
+  /** Opens the connection to the live update stream. */
   async connect(): Promise<void> {
     if (this.connected) return;
     this.#destroyed = false;
@@ -53,17 +53,17 @@ export class WebSocketManager {
       (globalThis as { WebSocket?: unknown }).WebSocket) as WebSocketConstructorLike | undefined;
     if (!WS) {
       throw new EtherfuseError(
-        "No hay implementación de WebSocket. En Node < 22 pasa `webSocket: WebSocket` del paquete 'ws' en las opciones del cliente.",
+        "No WebSocket implementation found. On Node < 22, pass `webSocket: WebSocket` from the 'ws' package in the client options.",
       );
     }
 
-    // Token de un solo uso, expira en 30 s: se pide justo antes de conectar.
+    // Single-use token, expires in 30s: requested right before connecting.
     const tokenResponse = await this.#client.rest.post<{ token?: string } | string>(
       Routes.wsToken(),
     );
     const token =
       typeof tokenResponse === "string" ? tokenResponse : (tokenResponse?.token ?? "");
-    if (!token) throw new EtherfuseError("La API no devolvió un token de WebSocket.");
+    if (!token) throw new EtherfuseError("The API did not return a WebSocket token.");
 
     const wsBase = this.#client.rest.baseUrl.replace(/^http/, "ws");
     const url = `${wsBase}${Routes.wsGateway()}?token=${encodeURIComponent(token)}`;
@@ -73,7 +73,7 @@ export class WebSocketManager {
 
     socket.addEventListener("open", () => {
       this.#reconnectAttempts = 0;
-      this.#client.emit("debug", "[WS] conectado");
+      this.#client.emit("debug", "[WS] connected");
       this.#client.emit("ready");
     });
 
@@ -82,7 +82,7 @@ export class WebSocketManager {
     });
 
     socket.addEventListener("error", () => {
-      this.#client.emit("debug", "[WS] error de socket");
+      this.#client.emit("debug", "[WS] socket error");
     });
 
     socket.addEventListener("close", (event: { code?: number; reason?: string }) => {
@@ -92,7 +92,7 @@ export class WebSocketManager {
     });
   }
 
-  /** Cierra la conexión y desactiva la reconexión automática. */
+  /** Closes the connection and disables automatic reconnection. */
   destroy(): void {
     this.#destroyed = true;
     if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
@@ -107,7 +107,7 @@ export class WebSocketManager {
       try {
         payload = JSON.parse(data);
       } catch {
-        /* frame no-JSON: se emite crudo */
+        /* non-JSON frame: emitted as-is */
       }
     }
     this.#client.emit("raw", payload);
@@ -143,12 +143,12 @@ export class WebSocketManager {
     if (attempt > 10) {
       this.#client.emit(
         "error",
-        new EtherfuseError("Reconexión de WebSocket abandonada tras 10 intentos."),
+        new EtherfuseError("WebSocket reconnection abandoned after 10 attempts."),
       );
       return;
     }
     const delay = Math.min(30_000, 1_000 * 2 ** (attempt - 1));
-    this.#client.emit("debug", `[WS] reintento ${attempt} en ${delay}ms`);
+    this.#client.emit("debug", `[WS] retry ${attempt} in ${delay}ms`);
     this.#reconnectTimer = setTimeout(() => {
       this.connect().catch((error) => this.#client.emit("error", error as Error));
     }, delay);

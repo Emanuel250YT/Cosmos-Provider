@@ -6,17 +6,17 @@ import { BaseManager } from "@/organisms/BaseManager";
 
 export interface ListAssetsOptions {
   blockchain: Blockchain;
-  /** Moneda fiat del ramp (MXN o BRL). */
+  /** Ramp fiat currency (MXN or BRL). */
   currency: FiatCurrency | string;
-  /** Dirección on-chain del usuario: la API la usa para chequeos (p. ej. trustlines en Stellar). */
+  /** User's on-chain address: the API uses it for checks (e.g. trustlines on Stellar). */
   wallet: string;
 }
 
 export class AssetManager extends BaseManager {
   /**
-   * Lista los activos soportados para blockchain + moneda + wallet
-   * (Solana: mint Base58; Stellar: `CODE:ISSUER`; EVM: dirección del contrato).
-   * La API exige los tres parámetros.
+   * Lists the supported assets for blockchain + currency + wallet
+   * (Solana: Base58 mint; Stellar: `CODE:ISSUER`; EVM: contract address).
+   * The API requires all three parameters.
    */
   async list({ blockchain, currency, wallet }: ListAssetsOptions): Promise<APIAsset[]> {
     const raw = await this.rest.get<APIAsset[] | { items?: APIAsset[] }>(Routes.assets(), {

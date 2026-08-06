@@ -38,6 +38,16 @@
       "types": "./dist/webhooks/index.d.ts",
       "import": "./dist/webhooks/index.js",
       "require": "./dist/webhooks/index.cjs"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js",
+      "require": "./dist/react/index.cjs"
+    },
+    "./react/server": {
+      "types": "./dist/react/server/index.d.ts",
+      "import": "./dist/react/server/index.js",
+      "require": "./dist/react/server/index.cjs"
     }
   },
   "files": [
@@ -56,24 +66,46 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "vitest run tests/e2e.test.ts",
-    "flow": "tsx examples/full-flow.ts",
-    "flow:mercadopago": "tsx examples/mercadopago-full-flow.ts",
-    "flow:koywe": "tsx examples/koywe-full-flow.ts",
-    "flow:sep": "tsx examples/sep-full-flow.ts",
+    "flow": "tsx examples/etherfuse/full-flow.ts",
+    "flow:etherfuse:quickstart": "tsx examples/etherfuse/quickstart.ts",
+    "flow:mercadopago:link": "tsx examples/mercadopago/payment-link.ts",
+    "flow:mercadopago:pix": "tsx examples/mercadopago/pix.ts",
+    "flow:koywe": "tsx examples/koywe/full-flow.ts",
+    "flow:sep": "tsx examples/sep/full-flow.ts",
     "flow:all": "tsx examples/all-flows.ts",
-    "demo": "tsx examples/run-all.ts",
-    "demo:ui": "tsx examples/demo-ui.ts",
+    "demo": "tsx examples/mercadopago/settlement-demo.ts",
+    "demo:ui": "tsx examples/mercadopago/demo-ui.tsx --env=test",
+    "demo:ui:prod": "tsx examples/mercadopago/demo-ui.tsx --env=production",
     "prepublishOnly": "npm run typecheck && npm run build && npm run test"
   },
   "dependencies": {
     "qrcode": "^1.5.4"
   },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@creit.tech/stellar-wallets-kit": "^2.5.0",
     "@stellar/stellar-sdk": "^16.2.0",
     "@types/node": "^22.20.1",
     "@types/qrcode": "^1.5.5",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
     "dotenv": "^17.4.2",
+    "esbuild": "^0.28.1",
+    "flag-icons": "^7.5.0",
     "js-sha3": "^0.12.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "tsup": "^8.3.5",
     "tsx": "^4.23.1",
     "typescript": "^5.7.2",

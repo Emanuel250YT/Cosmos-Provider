@@ -6,13 +6,13 @@ import type { APIWallet, Page, PageQuery, RegisterWalletOptions } from "@/types/
 import { BaseManager } from "@/organisms/BaseManager";
 
 export class WalletManager extends BaseManager {
-  /** Registra una wallet a nivel organización (soporta wallets embebidas). */
+  /** Registers an organization-level wallet (supports embedded wallets). */
   async register(options: RegisterWalletOptions): Promise<Wallet> {
     const raw = await this.rest.post<APIWallet>(Routes.wallet(), options);
     return new Wallet(this.client, raw);
   }
 
-  /** Registra la wallet de un customer hijo. */
+  /** Registers a child customer's wallet. */
   async registerForCustomer(
     customerId: string,
     options: RegisterWalletOptions,
@@ -21,13 +21,13 @@ export class WalletManager extends BaseManager {
     return new Wallet(this.client, raw);
   }
 
-  /** Una wallet a nivel organización por id. */
+  /** An organization-level wallet by id. */
   async fetch(walletId: string): Promise<Wallet> {
     const raw = await this.rest.get<APIWallet>(Routes.walletById(walletId));
     return new Wallet(this.client, raw);
   }
 
-  /** Lista paginada de wallets a nivel organización. */
+  /** Paginated list of organization-level wallets. */
   async list(query: PageQuery = {}): Promise<Page<Wallet>> {
     const raw = await this.rest.get<Page<APIWallet>>(Routes.wallets(), {
       query: { pageNumber: query.pageNumber, pageSize: query.pageSize },
@@ -35,7 +35,7 @@ export class WalletManager extends BaseManager {
     return { ...raw, items: (raw.items ?? []).map((w) => new Wallet(this.client, w)) };
   }
 
-  /** Wallets de un customer hijo. Sin paginación documentada — soporta tanto `Page<T>` como array plano. */
+  /** A child customer's wallets. Pagination undocumented — supports both `Page<T>` and a plain array. */
   async listForCustomer(customerId: string): Promise<Wallet[]> {
     const raw = await this.rest.get<Page<APIWallet> | APIWallet[]>(
       Routes.customerWallets(customerId),
@@ -44,7 +44,7 @@ export class WalletManager extends BaseManager {
     return items.map((w) => new Wallet(this.client, w));
   }
 
-  /** Da de baja una wallet a nivel organización. */
+  /** Deregisters an organization-level wallet. */
   delete(walletId: string): Promise<unknown> {
     return this.rest.delete(Routes.walletById(walletId));
   }

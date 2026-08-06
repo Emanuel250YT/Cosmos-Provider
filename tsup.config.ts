@@ -4,6 +4,8 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     "webhooks/index": "src/webhooks/index.ts",
+    "react/index": "src/react/index.ts",
+    "react/server/index": "src/react/server/index.ts",
   },
   format: ["esm", "cjs"],
   dts: true,
@@ -11,4 +13,5 @@ export default defineConfig({
   clean: true,
   target: "es2022",
   treeshake: true,
+  external: ["react", "react-dom"],
 });

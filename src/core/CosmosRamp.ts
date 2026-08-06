@@ -185,6 +185,11 @@ export class CosmosRamp extends TypedEventEmitter<RampEvents> {
     return provider;
   }
 
+  /** All registered providers, e.g. to let the user pick one in a UI. */
+  get providers(): readonly PaymentProvider[] {
+    return [...this.#providers.values()];
+  }
+
   // -------------------------------------------------------------------------
   // Quotes
   // -------------------------------------------------------------------------

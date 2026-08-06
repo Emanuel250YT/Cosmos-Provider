@@ -1,0 +1,92 @@
+import type { ReactNode } from "react";
+
+export interface PaymentMethodCardProps {
+  iconLabel: string;
+  iconBg: string;
+  /** Logo image URL — shown instead of the `iconLabel` initials when set. */
+  logoUrl?: string;
+  title: string;
+  subtitle: string;
+  selected?: boolean;
+  radioColor?: string;
+  bg?: string;
+  /** Expanded content (e.g. an inline confirmation panel) shown below the card when selected. */
+  children?: ReactNode;
+  onSelect?: () => void;
+}
+
+/** A selectable payment/withdraw method card (radio row + icon badge, optionally a provider logo). */
+export function PaymentMethodCard({
+  iconLabel,
+  iconBg,
+  logoUrl,
+  title,
+  subtitle,
+  selected = false,
+  radioColor = "var(--cosmos-radio, #D1D5DB)",
+  bg = "var(--cosmos-panel, #fff)",
+  children,
+  onSelect,
+}: PaymentMethodCardProps) {
+  return (
+    <div>
+      <div
+        onClick={onSelect}
+        role={onSelect ? "button" : undefined}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: 16,
+          borderRadius: 16,
+          background: bg,
+          fontFamily: "Helvetica, Arial, sans-serif",
+          cursor: onSelect ? "pointer" : undefined,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: "50%",
+              background: logoUrl ? "#fff" : iconBg,
+              border: logoUrl ? "1px solid var(--cosmos-border, #E5E7EB)" : undefined,
+              padding: logoUrl ? 6 : undefined,
+              boxSizing: "border-box",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#fff",
+              fontWeight: 700,
+              fontSize: 13,
+              flexShrink: 0,
+              overflow: "hidden",
+            }}
+          >
+            {logoUrl ? <img src={logoUrl} alt={title} style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : iconLabel}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ fontSize: 15, fontWeight: 600, color: "var(--cosmos-fg, #111827)" }}>{title}</span>
+            <span style={{ fontSize: 12, color: "var(--cosmos-muted, #9CA3AF)" }}>{subtitle}</span>
+          </div>
+        </div>
+        <div
+          style={{
+            width: 20,
+            height: 20,
+            borderRadius: "50%",
+            border: `2px solid ${radioColor}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          {selected ? <div style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--cosmos-fg, #111827)" }} /> : null}
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}

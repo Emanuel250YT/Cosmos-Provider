@@ -1,4 +1,4 @@
-/** Helper de tests: fetch falso que graba peticiones y devuelve respuestas enlatadas. */
+/** Test helper: fake fetch that records requests and returns canned responses. */
 
 export interface RecordedRequest {
   method: string;
@@ -9,11 +9,11 @@ export interface RecordedRequest {
 }
 
 export interface MockRule {
-  /** Match por método+path, p. ej. "POST /ramp/quote". Soporta prefijo con "*" final. */
+  /** Match by method+path, e.g. "POST /ramp/quote". Supports a trailing "*" prefix match. */
   route: string;
   status?: number;
   response?: unknown;
-  /** Si se define, se usan en orden para llamadas sucesivas a la misma ruta. */
+  /** If defined, used in order for successive calls to the same route. */
   sequence?: Array<{ status?: number; response?: unknown }>;
 }
 

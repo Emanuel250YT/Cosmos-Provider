@@ -33,46 +33,46 @@ import {
 } from "@/client/WebSocketManager";
 
 export interface EtherfuseClientOptions {
-  /** API key de Etherfuse. En frontend NO pongas la key: usa LookupClient o un proxy propio. */
+  /** Etherfuse API key. Do NOT put the key on the frontend: use LookupClient or your own proxy. */
   apiKey: string;
-  /** `sandbox` (default) o `production`. */
+  /** `sandbox` (default) or `production`. */
   environment?: Environment;
-  /** Anula la URL base (p. ej. para un proxy). */
+  /** Overrides the base URL (e.g. for a proxy). */
   baseUrl?: string;
-  /** customerId usado por defecto al pedir quotes (normalmente tu organización). */
+  /** Default customerId used when requesting quotes (usually your organization). */
   defaultCustomerId?: string;
-  /** Implementación de fetch (default: global). */
+  /** Fetch implementation (default: global). */
   fetch?: typeof fetch;
-  /** Implementación de WebSocket (Node < 22: pasa la clase del paquete `ws`). */
+  /** WebSocket implementation (Node < 22: pass the class from the `ws` package). */
   webSocket?: WebSocketConstructorLike;
-  /** Si `false`, los eventos `orderUpdated` no re-leen la orden vía REST. Default: `true`. */
+  /** If `false`, `orderUpdated` events don't re-read the order via REST. Default: `true`. */
   hydrateEvents?: boolean;
-  /** Timeout HTTP por intento en ms. Default: 30 000. */
+  /** HTTP timeout per attempt, in ms. Default: 30,000. */
   timeoutMs?: number;
-  /** Reintentos HTTP ante errores transitorios (424/429/5xx). Default: 2. */
+  /** HTTP retries on transient errors (424/429/5xx). Default: 2. */
   retries?: number;
 }
 
 export interface ClientEvents extends Record<string, unknown[]> {
-  /** Conexión WebSocket establecida. */
+  /** WebSocket connection established. */
   ready: [];
-  /** Mensajes de diagnóstico internos. */
+  /** Internal diagnostic messages. */
   debug: [message: string];
-  /** Errores asíncronos (gateway, hidratación de eventos...). */
+  /** Asynchronous errors (gateway, event hydration...). */
   error: [error: Error];
-  /** Frame crudo del WebSocket, sin procesar. */
+  /** Raw, unprocessed WebSocket frame. */
   raw: [payload: unknown];
-  /** Una orden cambió de estado. */
+  /** An order changed status. */
   orderUpdated: [payload: OrderUpdatedPayload];
-  /** El WebSocket se cerró (se reintenta automáticamente). */
+  /** The WebSocket closed (automatically retried). */
   disconnect: [info: { code?: number; reason?: string }];
 }
 
 export class EtherfuseClient extends TypedEventEmitter<ClientEvents> {
   readonly options: Readonly<EtherfuseClientOptions>;
-  /** Capa HTTP de bajo nivel — escape hatch para endpoints aún no tipados. */
+  /** Low-level HTTP layer — escape hatch for endpoints that aren't typed yet. */
   readonly rest: REST;
-  /** Gateway de eventos en vivo. */
+  /** Live events gateway. */
   readonly ws: WebSocketManager;
 
   readonly quotes: QuoteManager;
@@ -116,12 +116,12 @@ export class EtherfuseClient extends TypedEventEmitter<ClientEvents> {
     return this.rest.environment;
   }
 
-  /** Conecta el stream de eventos en vivo (`orderUpdated`, `ready`, ...). */
+  /** Connects the live event stream (`orderUpdated`, `ready`, ...). */
   connect(): Promise<void> {
     return this.ws.connect();
   }
 
-  /** Cierra el WebSocket y limpia listeners. */
+  /** Closes the WebSocket and clears listeners. */
   destroy(): void {
     this.ws.destroy();
     this.removeAllListeners();

@@ -15,6 +15,7 @@
  */
 
 import { createHmac } from "node:crypto";
+import { FiatCurrency } from "../../src/index";
 
 interface MockPayment {
   id: number;
@@ -59,7 +60,7 @@ export function createMockMercadoPago(options: { webhookSecret: string }) {
         id,
         status: "pending",
         transaction_amount: body.transaction_amount,
-        currency_id: "BRL",
+        currency_id: FiatCurrency.BRL,
         external_reference: body.external_reference,
       });
       return json({

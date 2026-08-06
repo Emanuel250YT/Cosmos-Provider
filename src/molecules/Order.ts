@@ -1,6 +1,6 @@
 /**
- * Molecule: Order — una orden de onramp/offramp con helpers de alto nivel
- * (instrucciones de depósito normalizadas, QR PIX, polling de estado).
+ * Molecule: Order — an onramp/offramp order with high-level helpers
+ * (normalized deposit instructions, PIX QR, status polling).
  */
 
 import { TERMINAL_ORDER_STATUSES, type OrderStatus } from "@/atoms/constants";
@@ -16,9 +16,9 @@ import { Base } from "@/molecules/Base";
 import { Pix, PixQr } from "@/molecules/Pix";
 
 /**
- * Busca las instrucciones de depósito en el payload crudo, tolerando los
- * distintos nombres de campo por corredor (SPEI usa `depositClabe`; PIX
- * expone el BR Code "copia e cola").
+ * Looks up the deposit instructions in the raw payload, tolerating the
+ * different field names per rail (SPEI uses `depositClabe`; PIX
+ * exposes the "copia e cola" BR Code).
  */
 export function extractDeposit(raw: Record<string, unknown>): DepositInstructions | null {
   const str = (key: string): string | undefined => {
@@ -49,63 +49,63 @@ export function extractDeposit(raw: Record<string, unknown>): DepositInstruction
 }
 
 export class Order extends Base<APIOrder> {
-  /** Id de esta orden en Etherfuse. */
+  /** This order's id in Etherfuse. */
   get id(): string {
     return this.raw.orderId;
   }
 
-  /** Estado actual, tal como lo informa la API. Usa {@link fetch} para refrescarlo. */
+  /** Current status, as reported by the API. Use {@link fetch} to refresh it. */
   get status(): OrderStatus | undefined {
     return this.raw.status;
   }
 
-  /** `true` si esta orden compra cripto con fiat. */
+  /** `true` if this order buys crypto with fiat. */
   get isOnramp(): boolean {
     return this.raw.orderType === "onramp";
   }
 
-  /** `true` si esta orden vende cripto por fiat. */
+  /** `true` if this order sells crypto for fiat. */
   get isOfframp(): boolean {
     return this.raw.orderType === "offramp";
   }
 
-  /** `true` cuando la orden llegó a un estado final. */
+  /** `true` once the order reaches a final status. */
   get isTerminal(): boolean {
     return this.status !== undefined && TERMINAL_ORDER_STATUSES.includes(this.status);
   }
 
-  /** Página de estado con marca de Etherfuse para mostrar al usuario final. */
+  /** Etherfuse-branded status page to show the end user. */
   get statusPage(): string | undefined {
     return this.raw.statusPage;
   }
 
-  /** Instrucciones de depósito normalizadas (onramps): PIX o SPEI. */
+  /** Normalized deposit instructions (onramps): PIX or SPEI. */
   get deposit(): DepositInstructions | null {
     return extractDeposit(this.raw);
   }
 
   /**
-   * Crea un {@link PixQr} a partir del código PIX de la orden.
-   * Devuelve `null` si la orden no tiene instrucciones PIX (p. ej. SPEI/MXN).
+   * Creates a {@link PixQr} from the order's PIX code.
+   * Returns `null` if the order has no PIX instructions (e.g. SPEI/MXN).
    */
   createPixQr(): PixQr | null {
     const code = this.deposit?.pixCode;
     return code ? Pix.fromCode(code, { validate: false }) : null;
   }
 
-  /** Vuelve a leer la orden desde la API y devuelve una instancia fresca. */
+  /** Re-reads the order from the API and returns a fresh instance. */
   fetch(): Promise<Order> {
     return this.client.orders.fetch(this.id);
   }
 
-  /** Cancela la orden. */
+  /** Cancels the order. */
   cancel(): Promise<unknown> {
     return this.client.orders.cancel(this.id);
   }
 
   /**
-   * Hace polling hasta que la orden alcance `status` (o cualquier estado
-   * terminal, para no esperar eternamente una orden fallida).
+   * Polls until the order reaches `status` (or any terminal status,
+   * so it doesn't wait forever on a failed order).
    */
   async waitForStatus(
     status: OrderStatus,
@@ -117,12 +117,12 @@ export class Order extends Base<APIOrder> {
       if (current.status === status) return current;
       if (current.isTerminal) {
         throw new EtherfuseError(
-          `La orden ${this.id} terminó en "${current.status}" antes de llegar a "${status}".`,
+          `Order ${this.id} ended in "${current.status}" before reaching "${status}".`,
         );
       }
       if (Date.now() >= deadline) {
         throw new EtherfuseError(
-          `Timeout esperando que la orden ${this.id} llegue a "${status}" (último estado: "${current.status}").`,
+          `Timed out waiting for order ${this.id} to reach "${status}" (last status: "${current.status}").`,
         );
       }
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
@@ -132,15 +132,15 @@ export class Order extends Base<APIOrder> {
 }
 
 /**
- * Resultado de `client.orders.create(...)`: la API devuelve un resumen
- * (no la orden completa), con las instrucciones de pago.
+ * Result of `client.orders.create(...)`: the API returns a summary
+ * (not the full order), with the payment instructions.
  */
 export class OrderReceipt extends Base<APICreateOrderResult & Record<string, unknown>> {
   readonly orderId: string;
   readonly direction: "onramp" | "offramp" | "unknown";
-  /** Onramps: instrucciones de depósito (PIX o SPEI). */
+  /** Onramps: deposit instructions (PIX or SPEI). */
   readonly deposit: DepositInstructions | null;
-  /** Offramps Stellar/anchor: datos de retiro. */
+  /** Stellar/anchor offramps: withdrawal data. */
   readonly withdraw: WithdrawInstructions | null;
 
   constructor(client: EtherfuseClient, raw: APICreateOrderResult & Record<string, unknown>) {
@@ -153,7 +153,7 @@ export class OrderReceipt extends Base<APICreateOrderResult & Record<string, unk
 
     const id = source["orderId"] ?? flat["orderId"];
     if (typeof id !== "string") {
-      throw new EtherfuseError("La respuesta de create order no contiene orderId.");
+      throw new EtherfuseError("The create order response doesn't contain an orderId.");
     }
     this.orderId = id;
     this.direction = onramp ? "onramp" : offramp ? "offramp" : "unknown";
@@ -167,13 +167,13 @@ export class OrderReceipt extends Base<APICreateOrderResult & Record<string, unk
       : null;
   }
 
-  /** QR PIX del depósito, o `null` si la orden no es PIX. */
+  /** Deposit PIX QR, or `null` if the order isn't PIX. */
   createPixQr(): PixQr | null {
     const code = this.deposit?.pixCode;
     return code ? Pix.fromCode(code, { validate: false }) : null;
   }
 
-  /** Obtiene la orden completa desde la API. */
+  /** Fetches the full order from the API. */
   fetch(): Promise<Order> {
     return this.client.orders.fetch(this.orderId);
   }

@@ -5,8 +5,8 @@ export class KoyweError extends Error {
   /** HTTP status code, when the error came from an API response. */
   readonly statusCode?: number;
 
-  constructor(message: string, code: string, statusCode?: number) {
-    super(message);
+  constructor(message: string, code: string, statusCode?: number, options?: { cause?: unknown }) {
+    super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
     this.name = "KoyweError";
     this.code = code;
     this.statusCode = statusCode;

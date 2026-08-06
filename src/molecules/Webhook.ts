@@ -1,30 +1,30 @@
-/** Molecule: Webhook — endpoint registrado para recibir eventos firmados. */
+/** Molecule: Webhook — an endpoint registered to receive signed events. */
 
 import type { APIWebhook } from "@/types/index";
 import { Base } from "@/molecules/Base";
 
 export class Webhook extends Base<APIWebhook> {
-  /** Id de este endpoint de webhook, cuando la API lo devuelve. */
+  /** This webhook endpoint's id, when the API returns it. */
   get id(): string | undefined {
     return this.raw.webhookId;
   }
 
-  /** URL a la que Etherfuse envía las notificaciones firmadas. */
+  /** URL Etherfuse sends signed notifications to. */
   get url(): string | undefined {
     return this.raw.url;
   }
 
   /**
-   * Secreto HMAC (base64). ¡Solo está presente en la respuesta de creación!
-   * Guárdalo de forma segura: no vuelve a devolverse.
+   * HMAC secret (base64). Only present in the creation response!
+   * Store it securely: it's never returned again.
    */
   get secret(): string | undefined {
     return this.raw.secret;
   }
 
-  /** Da de baja este endpoint de webhook. Lanza si no tiene `webhookId` (p. ej. un objeto construido a mano). */
+  /** Deregisters this webhook endpoint. Throws if it has no `webhookId` (e.g. a hand-built object). */
   delete(): Promise<unknown> {
-    if (!this.id) throw new Error("Este webhook no tiene webhookId.");
+    if (!this.id) throw new Error("This webhook has no webhookId.");
     return this.client.webhooks.delete(this.id);
   }
 }

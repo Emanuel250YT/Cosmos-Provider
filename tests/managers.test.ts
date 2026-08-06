@@ -23,7 +23,7 @@ describe("QuoteManager", () => {
     expiresAt: new Date(Date.now() + 120_000).toISOString(),
   };
 
-  it("genera quoteId automáticamente y usa defaultCustomerId", async () => {
+  it("generates quoteId automatically and uses defaultCustomerId", async () => {
     const { client, requests } = makeClient(
       [{ route: "POST /ramp/quote", response: quoteResponse }],
       { defaultCustomerId: "org-123" },
@@ -40,7 +40,7 @@ describe("QuoteManager", () => {
     expect(body["customerId"]).toBe("org-123");
   });
 
-  it("lanza si no hay customerId ni defaultCustomerId", async () => {
+  it("throws if there is neither customerId nor defaultCustomerId", async () => {
     const { client } = makeClient([]);
     await expect(
       client.quotes.create({
@@ -51,7 +51,7 @@ describe("QuoteManager", () => {
     ).rejects.toThrow(EtherfuseError);
   });
 
-  it("quote.createOrder fija el quoteId de la quote", async () => {
+  it("quote.createOrder sets the quoteId from the quote", async () => {
     const { client, requests } = makeClient(
       [
         { route: "POST /ramp/quote", response: quoteResponse },
@@ -74,7 +74,7 @@ describe("QuoteManager", () => {
 });
 
 describe("BankAccountManager", () => {
-  it("createPixPersonal envía el payload a la ruta del customer con transactionId", async () => {
+  it("createPixPersonal sends the payload to the customer route with transactionId", async () => {
     const { client, requests } = makeClient([
       {
         route: "POST /ramp/customer/org-123/bank-account",
@@ -95,7 +95,7 @@ describe("BankAccountManager", () => {
     expect(body.account["pixKey"]).toBe("joao@exemplo.com.br");
   });
 
-  it("respeta un transactionId explícito (idempotencia)", async () => {
+  it("respects an explicit transactionId (idempotency)", async () => {
     const { client, requests } = makeClient([
       {
         route: "POST /ramp/customer/org-123/bank-account",
@@ -118,7 +118,7 @@ describe("BankAccountManager", () => {
 });
 
 describe("SandboxManager", () => {
-  it("fiatReceived llama al endpoint sandbox con el orderId", async () => {
+  it("fiatReceived calls the sandbox endpoint with the orderId", async () => {
     const { client, requests } = makeClient([
       { route: "POST /ramp/order/fiat_received", response: {} },
     ]);
@@ -126,7 +126,7 @@ describe("SandboxManager", () => {
     expect(requests[0]!.body).toEqual({ orderId: "o-1" });
   });
 
-  it("se niega a correr contra producción", async () => {
+  it("refuses to run against production", async () => {
     const { client } = makeClient([], { environment: "production" });
     expect(() => client.sandbox.fiatReceived("o-1")).toThrow(/sandbox/);
   });
@@ -135,7 +135,7 @@ describe("SandboxManager", () => {
 describe("LookupManager / LookupClient", () => {
   const rates = { usd_to_brl: { rate: "5.07" }, usd_to_mxn: { rate: "17.34" } };
 
-  it("client.lookup no envía Authorization (endpoint público)", async () => {
+  it("client.lookup does not send Authorization (public endpoint)", async () => {
     const { client, requests } = makeClient([
       { route: "GET /lookup/exchange_rate", response: rates },
     ]);
@@ -144,7 +144,7 @@ describe("LookupManager / LookupClient", () => {
     expect(requests[0]!.headers["authorization"]).toBeUndefined();
   });
 
-  it("pasa max_age como query", async () => {
+  it("passes max_age as a query param", async () => {
     const { client, requests } = makeClient([
       { route: "GET /lookup/exchange_rate", response: rates },
     ]);
@@ -152,7 +152,7 @@ describe("LookupManager / LookupClient", () => {
     expect(new URL(requests[0]!.url).searchParams.get("max_age")).toBe("60");
   });
 
-  it("LookupClient funciona sin API key y apunta a producción por defecto", async () => {
+  it("LookupClient works without an API key and points to production by default", async () => {
     const { fetchImpl, requests } = createMockFetch([
       { route: "GET /lookup/exchange_rate", response: rates },
     ]);
@@ -165,7 +165,7 @@ describe("LookupManager / LookupClient", () => {
 });
 
 describe("OrderManager", () => {
-  it("fetch devuelve una Order hidratada", async () => {
+  it("fetch returns a hydrated Order", async () => {
     const { client } = makeClient([
       {
         route: "GET /ramp/order/o-9",
@@ -177,7 +177,7 @@ describe("OrderManager", () => {
     expect(order.status).toBe("funded");
   });
 
-  it("list mapea items a estructuras Order", async () => {
+  it("list maps items to Order structures", async () => {
     const { client } = makeClient([
       {
         route: "GET /ramp/orders",

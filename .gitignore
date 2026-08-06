@@ -4,5 +4,7 @@ dist/
 .env
 .env.*
 !.env.example
+!.env.test.example
+!.env.production.example
 .graphify/cache/
 .stellar-sandbox-keys.json

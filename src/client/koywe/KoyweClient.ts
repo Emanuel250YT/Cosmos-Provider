@@ -1,8 +1,6 @@
 /**
- * KoyweClient — client for the Koywe crypto fiat on/off-ramp API
- * (`https://api-sandbox.koywe.com` in sandbox, docs at
- * https://docs-crypto.koywe.com). Zero dependencies — copy the whole
- * `koywe/` folder into any TypeScript project.
+ * KoyweClient — client for the Koywe crypto fiat on/off-ramp API. Zero
+ * dependencies — copy the whole `koywe/` folder into any TypeScript project.
  *
  * **Server-side only** — authenticates with a `clientId`/`secret` pair that
  * must never reach the browser. Exchanges them for a 24h JWT
@@ -11,21 +9,27 @@
  *
  * On-ramp: Argentine pesos (and CLP/MXN/COP/PEN/BRL) → USDC on Stellar via
  * WIREAR (CVU bank transfer), QRI-AR (QR) or Khipu. Off-ramp: USDC → fiat to
- * a registered bank account.
+ * a registered bank account. WIREAR/WIRECL-style CVU/alias instructions are
+ * static per payment method (not per order) — read them off
+ * {@link KoyweClient.getPaymentProviders} before creating the order.
  *
  * ```ts
  * const koywe = new KoyweClient({
  *   clientId: process.env.KOYWE_CLIENT_ID!,
  *   secret: process.env.KOYWE_SECRET!,
- *   baseUrl: process.env.KOYWE_BASE_URL!, // https://api-sandbox.koywe.com
+ *   environment: "sandbox", // or "production" — picks the matching base URL
  *   usdcIssuer: process.env.PUBLIC_USDC_ISSUER!,
  * });
+ *
+ * koywe.environment; // "sandbox"
+ * koywe.baseUrl;     // "https://api-sandbox.koywe.com"
  *
  * const quote = await koywe.getQuote({ ramp: "onramp", fiatCurrency: "ARS", amount: "10000" });
  * const order = await koywe.createOnRampOrder({ quoteId: quote.id, stellarAddress: "G..." });
  * ```
  */
 
+import { Environments, type Environment } from "@/atoms/constants";
 import { Asset, FiatCurrency } from "@/atoms/enums";
 import { KoyweError } from "./errors";
 import { isValidStellarPublicKey } from "./stellarKey";
@@ -57,7 +61,22 @@ import type {
   KoyweQuoteResponse,
   KoyweOrderResponse,
   KoyweErrorResponse,
+  KoyweClientAddressResponse,
 } from "./types";
+
+/** Constructor options for {@link KoyweClient}. */
+export type KoyweClientOptions = KoyweConfig & { fetch?: typeof fetch };
+
+/**
+ * Base URL per environment. Sandbox is confirmed against Koywe's own
+ * reference client; production is the conventional `api.` counterpart —
+ * double-check it against your Koywe dashboard, or pass `baseUrl` to
+ * override it outright.
+ */
+const KOYWE_BASE_URLS: Record<Environment, string> = {
+  sandbox: "https://api-sandbox.koywe.com",
+  production: "https://api.koywe.com",
+};
 
 /** Koywe's symbol for USDC on Stellar in quote/order requests. */
 const USDC_STELLAR_SYMBOL = `${Asset.USDC} Stellar`;
@@ -89,6 +108,10 @@ export class KoyweClient {
   ];
   /** Local payment rails surfaced for Koywe (per market). */
   readonly supportedRails: readonly KoyweRail[] = ["wirear", "qri", "spei", "pse"];
+  /** `"sandbox"` or `"production"` — from `config.environment`, default `"sandbox"`. */
+  readonly environment: Environment;
+  /** Resolved base URL: `config.baseUrl` if given, otherwise the one matching `environment`. */
+  readonly baseUrl: string;
 
   readonly #config: KoyweConfig;
   #fetch: typeof fetch;
@@ -99,13 +122,13 @@ export class KoyweClient {
    */
   readonly #tokens = new Map<string, string>();
 
-  constructor(config: KoyweConfig & { fetch?: typeof fetch }) {
+  constructor(config: KoyweClientOptions) {
     if (!config.clientId || !config.secret) {
       throw new KoyweError("`clientId` and `secret` are required.", "MISSING_CREDENTIALS", 400);
     }
-    if (!config.baseUrl) {
-      throw new KoyweError("`baseUrl` is required.", "MISSING_BASE_URL", 400);
-    }
+    this.environment = config.environment ?? Environments.Sandbox;
+    // `||`, not `??`: an empty-string override should also fall through to the environment default.
+    this.baseUrl = (config.baseUrl || KOYWE_BASE_URLS[this.environment]).replace(/\/+$/, "");
     this.#config = config;
     this.#fetch = config.fetch ?? globalThis.fetch?.bind(globalThis);
     if (typeof this.#fetch !== "function") {
@@ -154,6 +177,8 @@ export class KoyweClient {
       label: labelForProvider(p.name),
       rail: railForProvider(p.name),
       fee: p.fee,
+      details: p.details,
+      deposit: parseDepositInstructions(p.details),
     }));
   }
 
@@ -207,8 +232,10 @@ export class KoyweClient {
   /**
    * Create an on-ramp order (fiat → USDC on Stellar) from an executable quote.
    *
-   * For WIREAR the response carries inline CVU/alias/bank instructions; for
-   * QRI / Khipu it carries a hosted redirect URL the user must open to pay.
+   * Every order gets an {@link KoyweOnRampOrder.interactiveUrl}. For WIREAR
+   * the deposit instructions (CVU/alias) are static per payment method — read
+   * them off {@link KoyweClient.getPaymentProviders} before calling this,
+   * rather than expecting them back on the order.
    */
   async createOnRampOrder(args: CreateOnRampOrderArgs): Promise<KoyweOnRampOrder> {
     if (!args.stellarAddress) {
@@ -250,7 +277,6 @@ export class KoyweClient {
       sourceAsset: displayAsset(response.symbolIn),
       targetAsset: displayAsset(response.symbolOut),
       stellarAddress: args.stellarAddress,
-      deposit: parseDepositInstructions(response.providedAddress),
       interactiveUrl: response.providedAction,
     };
   }
@@ -308,8 +334,9 @@ export class KoyweClient {
 
   /**
    * Create an off-ramp order (USDC on Stellar → fiat) from an executable
-   * quote. The user then sends USDC to {@link KoyweOffRampOrder.depositAddress}
-   * and submits the resulting tx hash via {@link submitTxHash}.
+   * quote. Call {@link getClientAddress} to learn where to send the USDC —
+   * it's a deposit address per crypto symbol, not part of the order — then
+   * submit the resulting tx hash via {@link submitTxHash}.
    */
   async createOffRampOrder(args: CreateOffRampOrderArgs): Promise<KoyweOffRampOrder> {
     const email = args.email ?? this.#config.email;
@@ -334,7 +361,6 @@ export class KoyweClient {
       sourceAsset: displayAsset(response.symbolIn),
       targetAsset: displayAsset(response.symbolOut),
       bankAccountId: args.bankAccountId,
-      depositAddress: response.providedAddress,
       interactiveUrl: response.providedAction,
     };
   }
@@ -351,6 +377,22 @@ export class KoyweClient {
       { txHash },
       email ?? this.#config.email,
     );
+  }
+
+  /**
+   * Fetch the deposit address for a crypto symbol
+   * (`GET /rest/client/getAddress?cryptoSymbol=`) — where off-ramp USDC
+   * transfers must be sent. Defaults to `"USDC Stellar"`, this client's only
+   * supported symbol.
+   */
+  async getClientAddress(cryptoSymbol: string = USDC_STELLAR_SYMBOL, email?: string): Promise<string> {
+    const response = await this.#request<KoyweClientAddressResponse>(
+      "GET",
+      `/rest/client/getAddress?cryptoSymbol=${encodeURIComponent(cryptoSymbol)}`,
+      undefined,
+      email ?? this.#config.email,
+    );
+    return response.address ?? "";
   }
 
   // ---------------------------------------------------------------------------
@@ -386,8 +428,6 @@ export class KoyweClient {
         destinationAmount: String(response.amountOut),
         sourceAsset: displayAsset(response.symbolIn),
         targetAsset: displayAsset(response.symbolOut),
-        deposit: parseDepositInstructions(response.providedAddress),
-        depositAddress: response.providedAddress,
         interactiveUrl: response.providedAction,
         dates: response.dates,
         txHash: response.txHash,
@@ -479,7 +519,7 @@ export class KoyweClient {
     const cached = this.#tokens.get(key);
     if (cached) return cached;
 
-    const url = `${this.#config.baseUrl}/rest/auth`;
+    const url = `${this.baseUrl}/rest/auth`;
     let response: Response;
     try {
       response = await this.#fetch(url, {
@@ -492,7 +532,7 @@ export class KoyweClient {
         }),
       });
     } catch (cause) {
-      throw new KoyweError("Network error on POST /rest/auth", "NETWORK_ERROR", undefined);
+      throw new KoyweError("Network error on POST /rest/auth", "NETWORK_ERROR", undefined, { cause });
     }
 
     if (!response.ok) {
@@ -517,7 +557,7 @@ export class KoyweClient {
     email?: string,
   ): Promise<T> {
     const token = await this.#authToken(email);
-    const url = `${this.#config.baseUrl}${endpoint}`;
+    const url = `${this.baseUrl}${endpoint}`;
     this.#debugLog(`${method} ${url}`, body ? JSON.stringify(body) : "");
 
     let response: Response;
@@ -528,7 +568,7 @@ export class KoyweClient {
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch (cause) {
-      throw new KoyweError(`Network error on ${method} ${endpoint}`, "NETWORK_ERROR", undefined);
+      throw new KoyweError(`Network error on ${method} ${endpoint}`, "NETWORK_ERROR", undefined, { cause });
     }
 
     if (!response.ok) {
@@ -649,19 +689,21 @@ function railForProvider(name: string): KoyweRail | undefined {
 }
 
 /**
- * Parse a WIREAR `providedAddress` multi-line string into structured deposit
- * fields, e.g.:
+ * Best-effort parse of a payment method's `details` multi-line string (from
+ * `GET /rest/payment-providers`) into structured deposit fields, e.g.:
  *
  *   ` CVU 0000053600000017871248 \n alias 30718280229.KOYWE1 \n Banco Coinag \n tef@koywe.com `
  *
- * Returns `undefined` when there is no inline instruction string (QRI/Khipu
- * orders use `interactiveUrl` instead).
+ * `details` is free text and its shape isn't guaranteed across countries —
+ * {@link KoyweDepositInstructions.raw} always preserves the original string.
+ * Returns `undefined` when the provider has no `details` (hosted-redirect
+ * rails like QRI/Khipu use `interactiveUrl` on the order instead).
  */
-function parseDepositInstructions(providedAddress: string | undefined): KoyweDepositInstructions | undefined {
-  if (!providedAddress || !providedAddress.trim()) return undefined;
+function parseDepositInstructions(details: string | undefined): KoyweDepositInstructions | undefined {
+  if (!details || !details.trim()) return undefined;
 
-  const result: KoyweDepositInstructions = { raw: providedAddress.trim() };
-  const lines = providedAddress
+  const result: KoyweDepositInstructions = { raw: details.trim() };
+  const lines = details
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);

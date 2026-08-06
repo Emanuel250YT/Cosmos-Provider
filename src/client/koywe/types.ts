@@ -1,12 +1,22 @@
 /** Types for {@link KoyweClient} — the Koywe crypto fiat on/off-ramp API. */
 
+import type { Environment } from "@/atoms/constants";
+
 export interface KoyweConfig {
   /** OAuth-style client id issued by Koywe. Server-side only. */
   clientId: string;
   /** Secret paired with `clientId`. Never expose to the browser. */
   secret: string;
-  /** `https://api-sandbox.koywe.com` (sandbox) or the production base URL. */
-  baseUrl: string;
+  /**
+   * `"sandbox"` (default) or `"production"` — picks the matching base URL
+   * (`https://api-sandbox.koywe.com` / `https://api.koywe.com`) unless
+   * `baseUrl` overrides it. Verify the production URL against your Koywe
+   * dashboard before going live; Koywe's public docs don't always render
+   * for automated fetches, so treat it as a sane default, not gospel.
+   */
+  environment?: Environment;
+  /** Explicit override of the base URL derived from `environment` (e.g. for a proxy). */
+  baseUrl?: string;
   /** Issuer account of the USDC trustline on Stellar, injected into `supportedTokens`. */
   usdcIssuer: string;
   /** Default email used when a call doesn't pass one explicitly. */
@@ -40,6 +50,14 @@ export interface KoywePaymentMethod {
   label: string;
   rail?: KoyweRail;
   fee?: number;
+  /**
+   * Static deposit instructions for bank-transfer rails (WIREAR, WIRECL...),
+   * best-effort parsed from {@link details}. These are per payment method,
+   * not per order — Koywe's own bank/CVU doesn't change between orders.
+   */
+  deposit?: KoyweDepositInstructions;
+  /** Raw wire-transfer instructions from Koywe (bank name, account, email...), unparsed. */
+  details?: string;
 }
 
 export interface KoyweQuote {
@@ -73,9 +91,12 @@ export interface KoyweOnRampOrder {
   sourceAsset: string;
   targetAsset: string;
   stellarAddress: string;
-  /** Inline deposit instructions (WIREAR). Absent for hosted-redirect rails. */
-  deposit?: KoyweDepositInstructions;
-  /** Hosted checkout URL to redirect the user to (QRI, Khipu). */
+  /**
+   * Checkout/status URL Koywe returns for every order, regardless of rail —
+   * for WIREAR-style bank transfers, get the CVU/alias to pay from
+   * {@link KoyweClient.getPaymentProviders}'s {@link KoywePaymentMethod.deposit}
+   * instead (it's static per payment method, not per order).
+   */
   interactiveUrl?: string;
 }
 
@@ -88,8 +109,6 @@ export interface KoyweOffRampOrder {
   sourceAsset: string;
   targetAsset: string;
   bankAccountId: string;
-  /** Stellar address the user must send USDC to. */
-  depositAddress?: string;
   interactiveUrl?: string;
 }
 
@@ -100,8 +119,6 @@ export interface KoyweOrder {
   destinationAmount: string;
   sourceAsset: string;
   targetAsset: string;
-  deposit?: KoyweDepositInstructions;
-  depositAddress?: string;
   interactiveUrl?: string;
   dates?: Record<string, string | undefined>;
   txHash?: string;
@@ -197,6 +214,9 @@ export interface KoywePaymentProvider {
   _id: string;
   name: string;
   fee?: number;
+  description?: string;
+  /** Raw wire-transfer instructions (bank name, account number, email...), free-text per provider. */
+  details?: string;
 }
 
 export interface KoyweQuoteResponse {
@@ -220,11 +240,15 @@ export interface KoyweOrderResponse {
   amountOut: number;
   symbolIn: string;
   symbolOut: string;
-  providedAddress?: string;
   providedAction?: string;
   dates?: Record<string, string | undefined>;
   txHash?: string;
   statusDetails?: unknown;
+}
+
+/** Raw response of `GET /client/getAddress`. */
+export interface KoyweClientAddressResponse {
+  address?: string;
 }
 
 export interface KoyweBankAccountRequest {

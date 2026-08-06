@@ -3,6 +3,7 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
@@ -22,7 +23,7 @@
   "exclude": [
     // Illustrative snippets only — not meant to run standalone, and don't
     // pull in react/express as real dependencies just to type-check them.
-    "examples/frontend-pix-qr.tsx",
-    "examples/webhook-server.ts"
+    "examples/frontend/pix-qr.tsx",
+    "examples/etherfuse/webhook-server.ts"
   ]
 }

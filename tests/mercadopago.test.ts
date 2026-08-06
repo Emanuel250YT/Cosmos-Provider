@@ -225,6 +225,54 @@ describe("MercadoPagoProvider charges", () => {
   });
 });
 
+describe("MercadoPagoProvider.createPaymentLink / createPixCharge", () => {
+  it("createPaymentLink builds a Checkout Pro preference directly", async () => {
+    const { fetchImpl, requests } = createMockFetch([
+      { route: "POST /checkout/preferences", response: { id: "pref-link", init_point: "https://mp.example/link" } },
+    ]);
+
+    const charge = await provider(fetchImpl).createPaymentLink({
+      amount: 5000,
+      currency: "ARS",
+      reference: "order-link-1",
+      description: "Buy USDC",
+    });
+
+    expect(charge).toMatchObject({ id: "pref-link", method: "link", link: "https://mp.example/link" });
+    expect(requests[0]!.headers["authorization"]).toBe("Bearer TEST-token");
+  });
+
+  it("createPixCharge builds a direct PIX payment on a production BRL account", async () => {
+    const { fetchImpl, requests } = createMockFetch([
+      {
+        route: "POST /v1/payments",
+        response: { id: 321, point_of_interaction: { transaction_data: { qr_code: "00020126...PIX" } } },
+      },
+    ]);
+    const mp = new MercadoPagoProvider({
+      accounts: { BRL: { accessToken: "APP_USR-br-token", sandbox: false, defaultPayerEmail: "buyer@example.com.br" } },
+      fetch: fetchImpl,
+    });
+
+    const charge = await mp.createPixCharge({ amount: 50, reference: "order-pix-1" });
+
+    expect(charge).toMatchObject({ id: "321", method: "qr", qr: "00020126...PIX" });
+    expect(requests[0]!.headers["authorization"]).toBe("Bearer APP_USR-br-token");
+  });
+
+  it("createPixCharge refuses to run against a sandbox BRL account", async () => {
+    const { fetchImpl } = createMockFetch([]);
+    const mp = new MercadoPagoProvider({
+      accounts: { BRL: { accessToken: "TEST-br-token", defaultPayerEmail: "buyer@example.com.br" } },
+      fetch: fetchImpl,
+    });
+
+    await expect(mp.createPixCharge({ amount: 50, reference: "order-pix-2" })).rejects.toThrow(
+      /not available on Mercado Pago sandbox/i,
+    );
+  });
+});
+
 describe("MercadoPagoProvider webhooks", () => {
   const SECRET = "super-secret";
 
@@ -302,6 +350,82 @@ describe("MercadoPagoProvider webhooks", () => {
     });
     expect(ignored).toBeNull();
   });
+
+  // IPN is what a `notification_url` set on a Checkout Pro preference
+  // actually receives — no `data.id` anywhere, so the v2-only parsing used to
+  // drop every payment on that rail.
+  it("parses IPN payment notifications (topic/id, no data.id)", async () => {
+    const { fetchImpl } = createMockFetch([]);
+    const mp = provider(fetchImpl);
+
+    const fromQuery = await mp.parseWebhook({
+      body: JSON.stringify({ resource: "https://api.mercadolibre.com/v1/payments/424242", topic: "payment" }),
+      headers: {},
+      url: "/webhooks/mercadopago-ar?topic=payment&id=424242",
+    });
+    expect(fromQuery).toMatchObject({ chargeId: "424242", kind: "payment" });
+
+    // Same notification with an empty query string — the id has to come out
+    // of the `resource` URL in the body instead.
+    const fromResource = await mp.parseWebhook({
+      body: JSON.stringify({ resource: "https://api.mercadolibre.com/v1/payments/515151", topic: "payment" }),
+      headers: {},
+    });
+    expect(fromResource).toMatchObject({ chargeId: "515151", kind: "payment" });
+  });
+
+  it("signs IPN notifications over the same id it parses", async () => {
+    const { fetchImpl } = createMockFetch([]);
+    const mp = provider(fetchImpl, { webhookSecret: SECRET });
+
+    const ts = "1700000000";
+    const requestId = "ipn-req-1";
+    const v1 = createHmac("sha256", SECRET).update(`id:424242;request-id:${requestId};ts:${ts};`).digest("hex");
+    const request = {
+      body: JSON.stringify({ resource: "https://api.mercadolibre.com/v1/payments/424242", topic: "payment" }),
+      headers: { "x-signature": `ts=${ts},v1=${v1}`, "x-request-id": requestId },
+      url: "/webhooks/mercadopago-ar?topic=payment&id=424242",
+    };
+
+    expect(await mp.verifyWebhook(request)).toBe(true);
+    expect(await mp.parseWebhook(request)).toMatchObject({ chargeId: "424242" });
+  });
+
+  it("resolves merchant_order notifications to the approved payment", async () => {
+    const { fetchImpl, requests } = createMockFetch([
+      {
+        route: "GET /merchant_orders/9001",
+        response: {
+          payments: [
+            { id: 111, status: "rejected" },
+            { id: 222, status: "approved" },
+          ],
+        },
+      },
+    ]);
+    const mp = provider(fetchImpl);
+
+    const notification = await mp.parseWebhook({
+      body: JSON.stringify({ resource: "https://api.mercadolibre.com/merchant_orders/9001", topic: "merchant_order" }),
+      headers: {},
+      url: "/webhooks/mercadopago-ar?topic=merchant_order&id=9001",
+    });
+
+    expect(notification).toMatchObject({ chargeId: "222", kind: "payment" });
+    expect(requests[0]!.url).toContain("/merchant_orders/9001");
+  });
+
+  it("ignores a merchant_order with no payments yet", async () => {
+    const { fetchImpl } = createMockFetch([{ route: "GET /merchant_orders/9002", response: { payments: [] } }]);
+    const mp = provider(fetchImpl);
+
+    const notification = await mp.parseWebhook({
+      body: JSON.stringify({ topic: "merchant_order" }),
+      headers: {},
+      url: "/webhooks/mercadopago-ar?topic=merchant_order&id=9002",
+    });
+    expect(notification).toBeNull();
+  });
 });
 
 describe("WebhookEmitter", () => {
@@ -360,5 +484,113 @@ describe("WebhookEmitter", () => {
     const [result] = await emitter.emit("order.created", {});
     expect(result).toMatchObject({ ok: true, attempts: 2 });
     expect(requests).toHaveLength(2);
+  });
+});
+
+describe("MercadoPagoProvider multi-account (per-country credentials)", () => {
+  it("defaults to name \"mercadopago\" and all seven markets", () => {
+    const { fetchImpl } = createMockFetch([]);
+    const mp = provider(fetchImpl);
+    expect(mp.name).toBe("mercadopago");
+    expect(mp.regions).toEqual(["AR", "BR", "MX", "CL", "CO", "PE", "UY"]);
+    expect(mp.currencies).toEqual(["ARS", "BRL", "MXN", "CLP", "COP", "PEN", "UYU"]);
+  });
+
+  it("accepts a custom name and a narrowed regions/currencies set", () => {
+    const { fetchImpl } = createMockFetch([]);
+    const ar = new MercadoPagoProvider({
+      accessToken: "TEST-ar-token",
+      name: "mercadopago-ar",
+      regions: ["AR"],
+      currencies: ["ARS"],
+      fetch: fetchImpl,
+    });
+    expect(ar.name).toBe("mercadopago-ar");
+    expect(ar.regions).toEqual(["AR"]);
+    expect(ar.currencies).toEqual(["ARS"]);
+  });
+
+  it("registers two country-scoped instances in the same CosmosRamp under distinct names", async () => {
+    const { CosmosRamp } = await import("@/core/CosmosRamp");
+    const { fetchImpl: arFetch, requests: arRequests } = createMockFetch([
+      { route: "POST /checkout/preferences", response: { id: "ar-pref", init_point: "https://mp.example/ar" } },
+    ]);
+    const { fetchImpl: brFetch, requests: brRequests } = createMockFetch([
+      {
+        route: "POST /v1/payments",
+        response: { id: 999, point_of_interaction: { transaction_data: { qr_code: "00020126...BR" } } },
+      },
+    ]);
+
+    const ar = new MercadoPagoProvider({
+      accessToken: "TEST-ar-token",
+      name: "mercadopago-ar",
+      regions: ["AR"],
+      currencies: ["ARS"],
+      fetch: arFetch,
+    });
+    const br = new MercadoPagoProvider({
+      accessToken: "TEST-br-token",
+      name: "mercadopago-br",
+      regions: ["BR"],
+      currencies: ["BRL"],
+      defaultPayerEmail: "buyer@example.com.br",
+      fetch: brFetch,
+    });
+
+    const ramp = new CosmosRamp({
+      providers: [ar, br],
+      oracle: { getRate: async () => 1000 },
+    });
+
+    const arOrder = await ramp.onramp({ provider: "mercadopago-ar", amount: 1000, currency: "ARS", method: "link" });
+    expect(arOrder.charge?.link).toBe("https://mp.example/ar");
+    expect(arRequests[0]!.headers["authorization"]).toBe("Bearer TEST-ar-token");
+
+    const brOrder = await ramp.onramp({ provider: "mercadopago-br", amount: 100, currency: "BRL", method: "qr" });
+    expect(brOrder.charge?.qr).toBe("00020126...BR");
+    expect(brRequests[0]!.headers["authorization"]).toBe("Bearer TEST-br-token");
+
+    // Each instance only accepts its own market's currency — asking the AR
+    // one to charge in reais is a clear error, not a confusing 401 from the
+    // real API.
+    await expect(
+      ramp.onramp({ provider: "mercadopago-ar", amount: 100, currency: "BRL", method: "qr" }),
+    ).rejects.toThrow(/does not support BRL/);
+  });
+});
+
+describe("MercadoPagoProvider per-account baseUrl", () => {
+  it("defaults every account to https://api.mercadopago.com", () => {
+    const { fetchImpl } = createMockFetch([]);
+    const mp = provider(fetchImpl);
+    expect(mp.baseUrl).toBe("https://api.mercadopago.com");
+  });
+
+  it("lets an `accounts` entry route through its own base URL, independent of the others", async () => {
+    const { fetchImpl: arFetch, requests: arRequests } = createMockFetch([
+      { route: "POST /checkout/preferences", response: { id: "ar-pref", init_point: "https://mp.example/ar" } },
+    ]);
+    const { fetchImpl: proxyFetch, requests: proxyRequests } = createMockFetch([
+      { route: "POST /mp/checkout/preferences", response: { id: "br-pref", init_point: "https://mp.example/br" } },
+    ]);
+    const dispatch: typeof fetch = (async (input, init) => {
+      const url = String(input);
+      return url.startsWith("https://proxy.example.com") ? proxyFetch(input, init) : arFetch(input, init);
+    }) as typeof fetch;
+
+    const mp = new MercadoPagoProvider({
+      accessToken: "TEST-ar-token", // default account, uses the top-level baseUrl
+      accounts: {
+        BRL: { accessToken: "TEST-br-token", baseUrl: "https://proxy.example.com/mp" },
+      },
+      fetch: dispatch,
+    });
+
+    await mp.createCharge({ amount: 100, currency: "ARS", method: "link", reference: "ar-1" });
+    expect(arRequests[0]!.url.startsWith("https://api.mercadopago.com")).toBe(true);
+
+    await mp.createCharge({ amount: 100, currency: "BRL", method: "link", reference: "br-1" });
+    expect(proxyRequests[0]!.url).toBe("https://proxy.example.com/mp/checkout/preferences");
   });
 });

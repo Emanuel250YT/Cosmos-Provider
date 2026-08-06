@@ -5,11 +5,14 @@
  * verified pipeline instead of re-implementing signature/amount/idempotency
  * checks by hand.
  *
- * Run with: npx tsx examples/confirm-order-on-return.ts
+ * Run with: npx tsx examples/mercadopago/confirm-order-on-return.ts
  */
 
-import { CosmosRamp, MercadoPagoProvider } from "../src/index";
-import { createMockMercadoPago } from "./helpers/mock-mercadopago";
+import { CosmosRamp, MercadoPagoProvider, FiatCurrency } from "../../src/index";
+import { createMockMercadoPago } from "../helpers/mock-mercadopago";
+import { isMainModule } from "../helpers/isMain";
+import { randomArsAmount } from "../helpers/random";
+import { printQr } from "../helpers/qr";
 
 // Exported so tests can drive the exact same instances this script runs —
 // swap `mp.fetchImpl` for nothing (real network) and a real TEST-... token
@@ -58,12 +61,13 @@ export async function confirmOrderOnReturn(orderId: string, paymentId: string) {
 async function main() {
   const order = await ramp.onramp({
     provider: "mercadopago",
-    amount: 50_000,
-    currency: "ARS",
+    amount: randomArsAmount(),
+    currency: FiatCurrency.ARS,
     wallet: "USER_WALLET",
     method: "link",
   });
   console.log("order created:", order.id, "| pay at:", order.charge?.link);
+  await printQr(order.charge?.qr ?? order.charge?.link, "Payment link QR");
 
   // Simulate the user paying, then returning to your app with the payment id
   // Mercado Pago appends to the redirect URL (`?payment_id=...`).
@@ -74,6 +78,6 @@ async function main() {
   console.log("confirming again:    ", await confirmOrderOnReturn(order.id, paymentId));
 }
 
-if (process.argv[1] && process.argv[1].endsWith("confirm-order-on-return.ts")) {
+if (isMainModule(import.meta.url)) {
   main().catch(console.error);
 }

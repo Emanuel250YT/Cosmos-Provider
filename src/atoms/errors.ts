@@ -1,6 +1,6 @@
-/** Atom: jerarquía de errores de la librería. */
+/** Atom: the library's error hierarchy. */
 
-/** Error base: todo lo que lanza cosmos-providers hereda de aquí. */
+/** Base error: everything cosmos-providers throws inherits from here. */
 export class EtherfuseError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -8,15 +8,15 @@ export class EtherfuseError extends Error {
   }
 }
 
-/** La API respondió con un status HTTP de error. */
+/** The API responded with an error HTTP status. */
 export class EtherfuseAPIError extends EtherfuseError {
-  /** Status HTTP (400, 404, 409, 424...). */
+  /** HTTP status (400, 404, 409, 424...). */
   readonly status: number;
-  /** Método HTTP de la petición que falló. */
+  /** HTTP method of the failed request. */
   readonly method: string;
-  /** Path de la petición que falló. */
+  /** Path of the failed request. */
   readonly path: string;
-  /** Cuerpo crudo de la respuesta de error (JSON parseado o texto). */
+  /** Raw body of the error response (parsed JSON or text). */
   readonly body: unknown;
 
   constructor(status: number, method: string, path: string, body: unknown) {
@@ -39,17 +39,17 @@ export class EtherfuseAPIError extends EtherfuseError {
     return "";
   }
 
-  /** 424: cotización temporalmente no disponible — reintentable con backoff. */
+  /** 424: quote temporarily unavailable — retryable with backoff. */
   get isRetryable(): boolean {
     return this.status === 424 || this.status === 429 || this.status >= 500;
   }
 }
 
-/** Fallo de red o timeout antes de recibir respuesta. */
+/** Network failure or timeout before receiving a response. */
 export class EtherfuseNetworkError extends EtherfuseError {}
 
-/** El payload PIX (BR Code) es inválido o no se pudo construir/parsear. */
+/** The PIX payload (BR Code) is invalid or couldn't be built/parsed. */
 export class PixError extends EtherfuseError {}
 
-/** Firma de webhook inválida. */
+/** Invalid webhook signature. */
 export class WebhookVerificationError extends EtherfuseError {}

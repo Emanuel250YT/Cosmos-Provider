@@ -1,0 +1,62 @@
+/**
+ * Create a Mercado Pago Checkout Pro payment link.
+ *
+ * This is the rail to reach for by default: it works in every Mercado Pago
+ * market (AR, BR, MX, CL, CO, PE, UY) and is the one that's actually usable
+ * against sandbox/test credentials. PIX (Brazil's other rail) is different
+ * enough — and unavailable in sandbox — that it gets its own example, see
+ * examples/mercadopago/pix.ts.
+ *
+ * Run:  npx tsx examples/mercadopago/payment-link.ts
+ * Env:  MP_AR_ACCESS_TOKEN and/or MP_BR_ACCESS_TOKEN in .env
+ *       MP_AR_WEBHOOK_SECRET / MP_BR_WEBHOOK_SECRET (optional, verifies the x-signature header)
+ */
+
+import "dotenv/config";
+import { MercadoPagoProvider, FiatCurrency, type Charge } from "../../src/index";
+import { isMainModule } from "../helpers/isMain";
+import { randomArsAmount, randomBrlAmount, randomReference } from "../helpers/random";
+import { printQr } from "../helpers/qr";
+
+export async function createPaymentLinkExample(): Promise<Charge | null> {
+  const arToken = process.env.MP_AR_ACCESS_TOKEN;
+  const brToken = process.env.MP_BR_ACCESS_TOKEN;
+  const accessToken = arToken || brToken;
+  if (!accessToken) {
+    console.log("Skipped: set MP_AR_ACCESS_TOKEN or MP_BR_ACCESS_TOKEN in .env to run this example.");
+    return null;
+  }
+  const currency = arToken ? FiatCurrency.ARS : FiatCurrency.BRL;
+  const webhookSecret = arToken ? process.env.MP_AR_WEBHOOK_SECRET : process.env.MP_BR_WEBHOOK_SECRET;
+
+  const mercadopago = new MercadoPagoProvider({
+    accessToken,
+    webhookSecret,
+    // Hardcoded on purpose: this is a test script, and the token's prefix
+    // alone can't tell sandbox and production apart (Mercado Pago issues
+    // "APP_USR-..." for both real accounts and "usuario de prueba" test
+    // accounts) — sandbox/production is a config decision you make in your
+    // own code, not something read from .env. Flip this to `false` in your
+    // own integration once you're ready to go live.
+    sandbox: true,
+  });
+
+  // Random amount + reference each run — a fixed one is unrealistic for a
+  // "demo" and can collide with an order a previous run already left behind.
+  const charge = await mercadopago.createPaymentLink({
+    amount: currency === FiatCurrency.ARS ? randomArsAmount() : randomBrlAmount(),
+    currency,
+    reference: randomReference(),
+    description: "cosmos-providers demo — payment link",
+  });
+
+  console.log(`Payment link (${currency}):`, charge.link);
+  // Checkout Pro links have no native QR — encode the link itself so it's
+  // still scannable straight from the terminal during a live test.
+  await printQr(charge.qr ?? charge.link, "Payment link QR");
+  return charge;
+}
+
+if (isMainModule(import.meta.url)) {
+  createPaymentLinkExample().catch(console.error);
+}

@@ -4,19 +4,19 @@ import { EtherfuseAPIError } from "@/atoms/errors";
 import { createMockFetch } from "./helpers/mockFetch";
 
 describe("REST", () => {
-  it("apunta al sandbox por defecto y a producción cuando se pide", () => {
+  it("points to the sandbox by default and to production when requested", () => {
     expect(new REST().baseUrl).toBe("https://api.sand.etherfuse.com");
     expect(new REST({ environment: "production" }).baseUrl).toBe("https://api.etherfuse.com");
   });
 
-  it("envía la API key en Authorization SIN prefijo Bearer", async () => {
+  it("sends the API key in Authorization WITHOUT a Bearer prefix", async () => {
     const { fetchImpl, requests } = createMockFetch([{ route: "GET /ramp/me", response: {} }]);
     const rest = new REST({ apiKey: "sk_test_123", fetch: fetchImpl });
     await rest.get("/ramp/me");
     expect(requests[0]!.headers["authorization"]).toBe("sk_test_123");
   });
 
-  it("no envía Authorization con auth:false (endpoints públicos)", async () => {
+  it("does not send Authorization with auth:false (public endpoints)", async () => {
     const { fetchImpl, requests } = createMockFetch([
       { route: "GET /lookup/exchange_rate", response: {} },
     ]);
@@ -25,7 +25,7 @@ describe("REST", () => {
     expect(requests[0]!.headers["authorization"]).toBeUndefined();
   });
 
-  it("serializa el query omitiendo undefined/null", async () => {
+  it("serializes the query, omitting undefined/null", async () => {
     const { fetchImpl, requests } = createMockFetch([{ route: "GET /x", response: {} }]);
     const rest = new REST({ fetch: fetchImpl });
     await rest.get("/x", { query: { a: 1, b: "dos", c: undefined, d: null } });
@@ -36,7 +36,7 @@ describe("REST", () => {
     expect(url.searchParams.has("d")).toBe(false);
   });
 
-  it("envía el body como JSON con Content-Type", async () => {
+  it("sends the body as JSON with Content-Type", async () => {
     const { fetchImpl, requests } = createMockFetch([{ route: "POST /ramp/quote", response: {} }]);
     const rest = new REST({ fetch: fetchImpl });
     await rest.post("/ramp/quote", { sourceAmount: "500" });
@@ -44,7 +44,7 @@ describe("REST", () => {
     expect(requests[0]!.body).toEqual({ sourceAmount: "500" });
   });
 
-  it("lanza EtherfuseAPIError con status y body en errores HTTP", async () => {
+  it("throws EtherfuseAPIError with status and body on HTTP errors", async () => {
     const { fetchImpl } = createMockFetch([
       { route: "GET /ramp/order/x", status: 404, response: { message: "Order not found" } },
     ]);
@@ -55,7 +55,7 @@ describe("REST", () => {
     expect((error as EtherfuseAPIError).message).toContain("Order not found");
   });
 
-  it("reintenta en 424 (quote transitoriamente no disponible) y termina bien", async () => {
+  it("retries on 424 (quote transiently unavailable) and eventually succeeds", async () => {
     const { fetchImpl, requests } = createMockFetch([
       {
         route: "POST /ramp/quote",
@@ -71,7 +71,7 @@ describe("REST", () => {
     expect(requests.length).toBe(2);
   });
 
-  it("NO reintenta en 400 (error estructural)", async () => {
+  it("does NOT retry on 400 (structural error)", async () => {
     const { fetchImpl, requests } = createMockFetch([
       { route: "POST /ramp/order", status: 400, response: { message: "invalid quote" } },
     ]);
@@ -80,7 +80,7 @@ describe("REST", () => {
     expect(requests.length).toBe(1);
   });
 
-  it("marca isRetryable correctamente", () => {
+  it("marks isRetryable correctly", () => {
     expect(new EtherfuseAPIError(424, "GET", "/x", null).isRetryable).toBe(true);
     expect(new EtherfuseAPIError(429, "GET", "/x", null).isRetryable).toBe(true);
     expect(new EtherfuseAPIError(500, "GET", "/x", null).isRetryable).toBe(true);

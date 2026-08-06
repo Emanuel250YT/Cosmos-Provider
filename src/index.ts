@@ -8,6 +8,16 @@
  * Node-only webhook verification lives in `cosmos-providers/webhooks`.
  */
 
+// Unified client (single entry point: ramp + Etherfuse + Koywe + SEP helpers)
+export { CosmosClient } from "@/core/CosmosClient";
+export type {
+  CosmosClientOptions,
+  SepHelpers,
+  UnifiedPaymentProvider,
+  UnifiedPaymentRequest,
+  UnifiedPaymentResult,
+} from "@/core/CosmosClient";
+
 // Core engine (provider-agnostic onramp/offramp)
 export { CosmosRamp } from "@/core/CosmosRamp";
 export type {
@@ -34,7 +44,12 @@ export type { CoinGeckoOracleOptions } from "@/oracles/CoinGeckoOracle";
 
 // Payment providers
 export { MercadoPagoProvider } from "@/providers/mercadopago/MercadoPagoProvider";
-export type { MercadoPagoProviderOptions } from "@/providers/mercadopago/MercadoPagoProvider";
+export type {
+  MercadoPagoProviderOptions,
+  MercadoPagoAccountCredentials,
+  MercadoPagoPaymentLinkRequest,
+  MercadoPagoPixChargeRequest,
+} from "@/providers/mercadopago/MercadoPagoProvider";
 export {
   CustomProvider,
   createCustomProvider,
@@ -45,6 +60,8 @@ export type {
   CustomAdapters,
   CustomWebhookConfig,
 } from "@/providers/custom/CustomProvider";
+export { EtherfuseProvider } from "@/providers/etherfuse/EtherfuseProvider";
+export type { EtherfuseProviderOptions } from "@/providers/etherfuse/EtherfuseProvider";
 
 // Outgoing webhooks (signed deliveries) + receiver-side verification
 export {

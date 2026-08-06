@@ -1,6 +1,6 @@
 /**
  * Organism: LookupManager — `client.lookup`.
- * Endpoints públicos (sin API key): apto para uso directo en frontend.
+ * Public endpoints (no API key): safe for direct frontend use.
  */
 
 import { Routes } from "@/atoms/constants";
@@ -9,8 +9,8 @@ import { BaseManager } from "@/organisms/BaseManager";
 
 export class LookupManager extends BaseManager {
   /**
-   * Tipos de cambio actuales (claves tipo `usd_to_brl`, `usd_to_mxn`).
-   * @param maxAgeSeconds Excluye fuentes más viejas que este umbral.
+   * Current exchange rates (keys like `usd_to_brl`, `usd_to_mxn`).
+   * @param maxAgeSeconds Excludes sources older than this threshold.
    */
   exchangeRates(maxAgeSeconds?: number): Promise<ExchangeRates> {
     return this.rest.get<ExchangeRates>(Routes.lookupExchangeRate(), {
@@ -19,34 +19,34 @@ export class LookupManager extends BaseManager {
     });
   }
 
-  /** Atajo: el par USD→BRL. */
+  /** Shortcut: the USD→BRL pair. */
   async usdToBrl(maxAgeSeconds?: number): Promise<ExchangeRatePair | undefined> {
     const rates = await this.exchangeRates(maxAgeSeconds);
     return rates["usd_to_brl"];
   }
 
-  /** Atajo: el par USD→MXN. */
+  /** Shortcut: the USD→MXN pair. */
   async usdToMxn(maxAgeSeconds?: number): Promise<ExchangeRatePair | undefined> {
     const rates = await this.exchangeRates(maxAgeSeconds);
     return rates["usd_to_mxn"];
   }
 
-  /** Catálogo de stablebonds disponibles. */
+  /** Catalog of available stablebonds. */
   stablebonds(): Promise<unknown> {
     return this.rest.get(Routes.lookupStablebonds(), { auth: false });
   }
 
-  /** Costo/rendimiento de un stablebond concreto. */
+  /** Cost/yield of a specific stablebond. */
   stablebondCost(query?: Record<string, string | number>): Promise<unknown> {
     return this.rest.get(Routes.lookupStablebondCost(), { auth: false, query });
   }
 
-  /** Códigos de país soportados por Etherfuse. */
+  /** Country codes supported by Etherfuse. */
   countryCodes(): Promise<unknown> {
     return this.rest.get(Routes.lookupCountryCodes(), { auth: false });
   }
 
-  /** Países restringidos (no operables) para el ramp. */
+  /** Restricted (non-operable) countries for the ramp. */
   restrictedCountries(): Promise<unknown> {
     return this.rest.get(Routes.lookupRestrictedCountries(), { auth: false });
   }

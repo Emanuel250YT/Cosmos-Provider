@@ -1,10 +1,10 @@
 /**
  * Molecule: PIX (BR Code EMV® QRCPS-MPM).
  *
- * - `Pix.create(...)` construye un QR estático de cobro a partir de una llave PIX.
- * - `Pix.fromCode(...)` envuelve un "copia e cola" existente (p. ej. el que
- *   devuelve Etherfuse en una orden onramp BRL) para renderizarlo como QR.
- * - `PixQr` renderiza el payload como Data URL (PNG) o SVG, en navegador y Node.
+ * - `Pix.create(...)` builds a static payment QR from a PIX key.
+ * - `Pix.fromCode(...)` wraps an existing "copia e cola" (e.g. the one
+ *   Etherfuse returns on a BRL onramp order) to render it as a QR.
+ * - `PixQr` renders the payload as a Data URL (PNG) or SVG, in the browser and Node.
  */
 
 import QRCode from "qrcode";
@@ -14,22 +14,22 @@ import { PixError } from "@/atoms/errors";
 const PIX_GUI = "br.gov.bcb.pix";
 
 export interface PixStaticOptions {
-  /** Llave PIX del cobrador: CPF/CNPJ, email, teléfono (+55...) o llave aleatoria. */
+  /** Payee's PIX key: CPF/CNPJ, email, phone (+55...), or random key. */
   pixKey: string;
-  /** Nombre del cobrador (máx. 25 caracteres; se normaliza a ASCII). */
+  /** Payee's name (max 25 characters; normalized to ASCII). */
   merchantName: string;
-  /** Ciudad del cobrador (máx. 15 caracteres; se normaliza a ASCII). */
+  /** Payee's city (max 15 characters; normalized to ASCII). */
   merchantCity: string;
-  /** Monto en BRL. Si se omite, el pagador lo introduce manualmente. */
+  /** Amount in BRL. If omitted, the payer enters it manually. */
   amount?: number | string;
-  /** Identificador de transacción (A-Z a-z 0-9, máx. 25). Default: "***". */
+  /** Transaction identifier (A-Z a-z 0-9, max 25). Default: "***". */
   txid?: string;
-  /** Mensaje/descripción opcional que ve el pagador. */
+  /** Optional message/description shown to the payer. */
   description?: string;
 }
 
 export interface ParsedPix {
-  /** Payload completo original. */
+  /** Original full payload. */
   payload: string;
   pixKey?: string;
   description?: string;
@@ -39,31 +39,31 @@ export interface ParsedPix {
   txid?: string;
   currency?: string;
   countryCode?: string;
-  /** `true` si el CRC del payload es correcto. */
+  /** `true` if the payload's CRC is correct. */
   valid: boolean;
-  /** Mapa TLV completo de primer nivel. */
+  /** Full top-level TLV map. */
   fields: Record<string, string>;
 }
 
 export interface PixQrImageOptions {
-  /** Píxeles del QR generado (PNG). Default: 320. */
+  /** Pixel size of the generated QR (PNG). Default: 320. */
   width?: number;
-  /** Margen en módulos. Default: 2. */
+  /** Margin in modules. Default: 2. */
   margin?: number;
-  /** Nivel de corrección de errores. Default: "M". */
+  /** Error correction level. Default: "M". */
   errorCorrectionLevel?: "L" | "M" | "Q" | "H";
   color?: { dark?: string; light?: string };
 }
 
-/** Campo TLV EMV: id (2) + longitud (2) + valor. */
+/** EMV TLV field: id (2) + length (2) + value. */
 function emv(id: string, value: string): string {
   if (value.length > 99) {
-    throw new PixError(`El campo EMV ${id} excede 99 caracteres (${value.length}).`);
+    throw new PixError(`EMV field ${id} exceeds 99 characters (${value.length}).`);
   }
   return `${id}${String(value.length).padStart(2, "0")}${value}`;
 }
 
-/** Quita diacríticos y caracteres fuera del set EMV, y recorta a `max`. */
+/** Strips diacritics and characters outside the EMV set, and trims to `max`. */
 function normalizeText(value: string, max: number): string {
   const ascii = value
     .normalize("NFD")
@@ -77,21 +77,21 @@ function normalizeText(value: string, max: number): string {
 function formatAmount(amount: number | string): string {
   const num = typeof amount === "string" ? Number(amount) : amount;
   if (!Number.isFinite(num) || num <= 0) {
-    throw new PixError(`Monto PIX inválido: ${String(amount)}`);
+    throw new PixError(`Invalid PIX amount: ${String(amount)}`);
   }
   return num.toFixed(2);
 }
 
 export class Pix {
-  /** Construye el payload "copia e cola" de un PIX estático. */
+  /** Builds the "copia e cola" payload for a static PIX. */
   static payload(options: PixStaticOptions): string {
     const { pixKey } = options;
-    if (!pixKey || !pixKey.trim()) throw new PixError("pixKey es obligatoria.");
+    if (!pixKey || !pixKey.trim()) throw new PixError("pixKey is required.");
 
     const merchantName = normalizeText(options.merchantName, 25);
     const merchantCity = normalizeText(options.merchantCity, 15);
-    if (!merchantName) throw new PixError("merchantName es obligatorio.");
-    if (!merchantCity) throw new PixError("merchantCity es obligatoria.");
+    if (!merchantName) throw new PixError("merchantName is required.");
+    if (!merchantCity) throw new PixError("merchantCity is required.");
 
     const txid = (options.txid ?? "***").replace(/[^A-Za-z0-9*]/g, "").slice(0, 25) || "***";
 
@@ -105,7 +105,7 @@ export class Pix {
       emv("00", "01"), // Payload Format Indicator
       emv("26", merchantAccount), // Merchant Account Information (PIX)
       emv("52", "0000"), // Merchant Category Code
-      emv("53", "986"), // Moneda: BRL (ISO 4217)
+      emv("53", "986"), // Currency: BRL (ISO 4217)
       options.amount !== undefined ? emv("54", formatAmount(options.amount)) : "",
       emv("58", "BR"),
       emv("59", merchantName),
@@ -117,27 +117,27 @@ export class Pix {
     return withCrcTag + crc16ccitt(withCrcTag);
   }
 
-  /** Crea un QR PIX estático listo para renderizar. */
+  /** Creates a static PIX QR ready to render. */
   static create(options: PixStaticOptions): PixQr {
     return new PixQr(Pix.payload(options));
   }
 
   /**
-   * Envuelve un código "copia e cola" ya existente (p. ej. el devuelto por
-   * Etherfuse al crear una orden onramp en BRL) para renderizarlo como QR.
+   * Wraps an existing "copia e cola" code (e.g. the one returned by
+   * Etherfuse when creating a BRL onramp order) to render it as a QR.
    */
   static fromCode(code: string, { validate = true }: { validate?: boolean } = {}): PixQr {
     const trimmed = code.trim();
-    if (!trimmed) throw new PixError("El código PIX está vacío.");
+    if (!trimmed) throw new PixError("The PIX code is empty.");
     if (validate && !Pix.validate(trimmed)) {
       throw new PixError(
-        "El código PIX tiene un CRC inválido. Usa { validate: false } para omitir la verificación.",
+        "The PIX code has an invalid CRC. Use { validate: false } to skip verification.",
       );
     }
     return new PixQr(trimmed);
   }
 
-  /** Verifica el CRC16 del payload. */
+  /** Verifies the payload's CRC16. */
   static validate(code: string): boolean {
     const trimmed = code.trim();
     if (trimmed.length < 8) return false;
@@ -146,10 +146,10 @@ export class Pix {
     return crc16ccitt(body) === trimmed.slice(-4).toUpperCase();
   }
 
-  /** Decodifica un BR Code a sus campos principales. */
+  /** Decodes a BR Code into its main fields. */
   static parse(code: string): ParsedPix {
     const payload = code.trim();
-    const fields = Pix.#tlv(payload.slice(0, -8)); // sin "6304" + CRC
+    const fields = Pix.#tlv(payload.slice(0, -8)); // without "6304" + CRC
     const crcOk = Pix.validate(payload);
 
     const merchantAccount = fields["26"] ? Pix.#tlv(fields["26"]) : {};
@@ -184,16 +184,16 @@ export class Pix {
   }
 }
 
-/** Un payload PIX renderizable como imagen QR. */
+/** A PIX payload renderable as a QR image. */
 export class PixQr {
   constructor(readonly payload: string) {}
 
-  /** Campos decodificados del payload. */
+  /** Decoded fields from the payload. */
   parse(): ParsedPix {
     return Pix.parse(this.payload);
   }
 
-  /** Data URL `image/png` — ideal para `<img src>` en frontend. */
+  /** `image/png` Data URL — ideal for `<img src>` in the frontend. */
   toDataURL(options: PixQrImageOptions = {}): Promise<string> {
     return QRCode.toDataURL(this.payload, {
       width: options.width ?? 320,
@@ -203,7 +203,7 @@ export class PixQr {
     });
   }
 
-  /** Markup SVG del QR — escalable, sin canvas. */
+  /** SVG markup for the QR — scalable, no canvas. */
   toSVG(options: PixQrImageOptions = {}): Promise<string> {
     return QRCode.toString(this.payload, {
       type: "svg",
@@ -214,13 +214,13 @@ export class PixQr {
     });
   }
 
-  /** QR como texto para imprimir en terminal (útil en CLIs/back-office). */
+  /** QR as text for printing in a terminal (useful for CLIs/back-office). */
   toTerminal(): Promise<string> {
     const options = { type: "terminal", small: true } as Parameters<typeof QRCode.toString>[1];
     return QRCode.toString(this.payload, options) as Promise<string>;
   }
 
-  /** El "copia e cola" que el pagador puede pegar en su app bancaria. */
+  /** The "copia e cola" the payer can paste into their banking app. */
   toString(): string {
     return this.payload;
   }

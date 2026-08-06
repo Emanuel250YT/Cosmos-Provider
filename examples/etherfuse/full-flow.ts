@@ -1,86 +1,91 @@
 /**
- * Flujo completo contra el sandbox de Etherfuse, para TODAS las chains que
- * soporta (Stellar, Solana, Base, Polygon, Monad):
+ * Full flow against the Etherfuse sandbox, for EVERY chain it supports
+ * (Stellar, Solana, Base, Polygon, Monad):
  *
- *   organización → cuenta bancaria PIX (BRL, una sola vez)
- *   → por cada chain: wallet nueva (+ trustline automática en Stellar)
- *     → quote → orden → QR PIX → simular depósito fiat → chequeo de estado
+ *   organization → PIX bank account (BRL, once)
+ *   → per chain: fresh wallet (+ automatic trustline on Stellar)
+ *     → quote → order → PIX QR → simulate fiat deposit → status check
  *
- * Preparación: crea un .env en la raíz con ETHERFUSE_API_KEY=tu_key_de_sandbox
- * y ejecutá `npm run flow`. Nada más es obligatorio — cada chain arma su
- * propia wallet de prueba sola, no hace falta configurar nada por chain.
+ * Setup: create a `.env` at the repo root with ETHERFUSE_API_KEY=your_sandbox_key
+ * and run `npm run flow`. Nothing else is required — each chain builds its
+ * own throwaway wallet on its own, no per-chain configuration needed.
  *
- * IMPORTANTE sobre el activo destino: el onramp de Etherfuse entrega uno de
- * SUS stablebonds tokenizados (CETES para MXN, TESOURO para BRL) — no USDC
- * directo. El mint/identifier de cada stablebond NO está hardcodeado: se
- * resuelve en cada corrida contra `client.lookup.stablebonds()` (público,
- * sin API key), eligiendo el activo con mayor `totalSupply` para esa
- * moneda+chain. Un mint fijo se rompe con el tiempo — ya lo vimos romperse
- * en la práctica (el catálogo del sandbox rota qué bond está activo).
+ * IMPORTANT about the target asset: Etherfuse's onramp delivers one of ITS
+ * tokenized stablebonds (CETES for MXN, TESOURO for BRL) — not raw USDC.
+ * Each stablebond's mint/identifier is NOT hardcoded: it's resolved on every
+ * run against `client.lookup.stablebonds()` (public, no API key needed),
+ * picking the asset with the highest `totalSupply` for that currency+chain.
+ * A fixed mint breaks over time — we've seen it break in practice (the
+ * sandbox catalog rotates which bond is active).
  *
- * TRUSTLINES: en Stellar, recibir un asset ajeno (no XLM) exige que la
- * cuenta receptora abra una "trustline" para ese asset — y eso solo lo puede
- * firmar el dueño de la cuenta (nadie puede abrirla en tu nombre). Por eso
- * este script genera su PROPIO par de claves de Stellar por corrida, lo
- * fondea en testnet vía Friendbot, y abre la trustline él mismo antes de
- * pedir la orden. Es la única chain que necesita esto: en Solana, Etherfuse
- * despliega la cuenta de token asociada por su cuenta (no hace falta que
- * nosotros hagamos nada); en las EVM (Base/Polygon/Monad) cualquier
- * dirección puede recibir un ERC-20 sin configuración previa.
+ * TRUSTLINES: on Stellar, receiving a non-native asset (anything but XLM)
+ * requires the receiving account to open a "trustline" for that asset — and
+ * only the account owner can sign that (nobody can open it on your behalf).
+ * That's why this script generates its OWN Stellar keypair per run, funds it
+ * on testnet via Friendbot, and opens the trustline itself before requesting
+ * the order. It's the only chain that needs this: on Solana, Etherfuse
+ * deploys the associated token account on its own (nothing for us to do);
+ * on the EVM chains (Base/Polygon/Monad) any address can receive an ERC-20
+ * with no prior setup.
  *
- * DISEÑO: nada bloquea el flujo.
- * - Cada chain corre en su propio try/catch — si una falla, se anota el
- *   error y se sigue con la siguiente chain (no se corta todo el script).
- * - Después de simular el depósito fiat NO se espera en un poll largo a que
- *   la orden llegue a "completed" (eso puede tardar minutos en el sandbox y
- *   trababa el flujo). Se hace UN solo chequeo rápido y lo que no sea un
- *   estado terminal queda anotado como "pending" — se puede consultar más
- *   tarde con la `statusPage` que se imprime.
- * - Al final SIEMPRE se imprime una tabla con todo lo que se creó por cada
- *   chain — ids, wallets, tx de trustline, quotes, órdenes, códigos PIX,
- *   estados — aunque alguna haya fallado.
+ * DESIGN: nothing blocks the flow.
+ * - Each chain runs in its own try/catch — if one fails, the error is
+ *   logged and the script moves on to the next chain (the whole script
+ *   never stops).
+ * - After simulating the fiat deposit, it does NOT wait in a long poll for
+ *   the order to reach "completed" (that can take minutes in the sandbox
+ *   and would stall the flow). It does ONE quick check, and anything short
+ *   of a terminal state is logged as "pending" — it can be checked later
+ *   via the `statusPage` that gets printed.
+ * - At the end, a table with everything created per chain is ALWAYS
+ *   printed — ids, wallets, trustline tx, quotes, orders, PIX codes,
+ *   statuses — even if some chain failed.
  */
 
 import "dotenv/config";
 import { randomBytes, generateKeyPairSync } from "node:crypto";
 import { keccak256 } from "js-sha3";
 import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset as StellarAsset, BASE_FEE } from "@stellar/stellar-sdk";
-import { EtherfuseClient, EtherfuseAPIError, Pix, Chain, FiatCurrency, Asset, type Quote, type OrderReceipt } from "../src/index";
-import { isMainModule } from "./helpers/isMain";
+import { CosmosClient, EtherfuseAPIError, Pix, Chain, FiatCurrency, Asset, type EtherfuseClient, type Quote, type OrderReceipt } from "../../src/index";
+import { isMainModule } from "../helpers/isMain";
+import { randomBrlAmount } from "../helpers/random";
+import { printQr } from "../helpers/qr";
 
-/** Moneda que este flujo soporta (Etherfuse liquida solo BRL/MXN hoy). */
+/** Currency this flow supports (Etherfuse only settles BRL/MXN today). */
 type EtherfuseFiat = typeof FiatCurrency.BRL | typeof FiatCurrency.MXN;
 
-/** Todas las chains que Etherfuse soporta — el flujo corre una por una para cada una. */
+/** Every chain Etherfuse supports — the flow runs one after another for each. */
 const CHAINS: readonly Chain[] = [Chain.Stellar, Chain.Solana, Chain.Base, Chain.Polygon, Chain.Monad];
 
-/** Símbolo del stablebond de Etherfuse que recibe cada moneda (solo para loguear). */
+/** Etherfuse stablebond symbol each currency settles into (logging only). */
 const STABLEBOND_FOR: Record<EtherfuseFiat, Asset> = {
   [FiatCurrency.BRL]: Asset.TESOURO,
   [FiatCurrency.MXN]: Asset.CETES,
 };
-// Último recurso si `client.lookup.stablebonds()` falla (red caída, etc.) o
-// no devuelve nada usable para esta moneda+chain. Puede quedar desactualizado
-// — por eso es fallback, no la fuente principal.
+// Last resort if `client.lookup.stablebonds()` fails (network down, etc.) or
+// returns nothing usable for this currency+chain. Can go stale over time —
+// that's why it's a fallback, not the primary source.
 const FALLBACK_TARGET_ASSET: Record<EtherfuseFiat, Partial<Record<Chain, string>>> = {
   [FiatCurrency.BRL]: {
-    [Chain.Solana]: "EyvBnTz9QDVc2oaBVeu77kndynmD5njrWjZghYh5xpUk", // TESOURO, puede haber rotado
+    [Chain.Solana]: "EyvBnTz9QDVc2oaBVeu77kndynmD5njrWjZghYh5xpUk", // TESOURO, may have rotated
     [Chain.Stellar]: "TESOURO-GC3CW7EDYRTWQ635VDIGY6S4ZUF5L6TQ7AA4MWS7LEQDBLUSZXV7UPS4",
   },
   [FiatCurrency.MXN]: {
-    [Chain.Solana]: "AvvetPGuuB5FD5m86fpw3LtDKyQoUFT1mG9WarNQLW4q", // CETES, puede haber rotado
+    [Chain.Solana]: "AvvetPGuuB5FD5m86fpw3LtDKyQoUFT1mG9WarNQLW4q", // CETES, may have rotated
     [Chain.Stellar]: "CETES-GC3CW7EDYRTWQ635VDIGY6S4ZUF5L6TQ7AA4MWS7LEQDBLUSZXV7UPS4",
   },
 };
 
-// Se construyen recién dentro de `runEtherfuseFlow()`, solo si hay API key —
-// así este módulo se puede importar (p. ej. desde all-flows.ts) sin
-// necesitar ETHERFUSE_API_KEY configurada.
+// Built only inside `runEtherfuseFlow()`, and only if an API key is present —
+// that way this module can be imported (e.g. from all-flows.ts) without
+// needing ETHERFUSE_API_KEY set. Everything comes from ONE `CosmosClient`
+// (`cosmos.etherfuse`), not a standalone `EtherfuseClient`.
+let cosmos: CosmosClient;
 let client: EtherfuseClient;
 const stellarServer = new Horizon.Server("https://horizon-testnet.stellar.org");
 
 // ---------------------------------------------------------------------------
-// Generación de direcciones de prueba, una por chain
+// Throwaway address generation, one per chain
 // ---------------------------------------------------------------------------
 
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -106,14 +111,14 @@ function base58Encode(bytes: Uint8Array): string {
   return BASE58_ALPHABET[0]!.repeat(leadingZeros) + digits.reverse().map((d) => BASE58_ALPHABET[d]).join("");
 }
 
-/** Clave pública ed25519 al azar, codificada como address de Solana (base58). Nunca firmamos nada en Solana acá — Etherfuse despliega la cuenta de token por su cuenta. */
+/** Random ed25519 public key, encoded as a Solana address (base58). We never sign anything on Solana here — Etherfuse deploys the token account on its own. */
 function generateSolanaAddress(): string {
   const { publicKey } = generateKeyPairSync("ed25519");
   const der = publicKey.export({ type: "spki", format: "der" }) as Buffer;
   return base58Encode(der.subarray(der.length - 32));
 }
 
-/** EIP-55: casing mixto derivado del hash Keccak-256 del address en minúsculas — Etherfuse lo exige, no es opcional. */
+/** EIP-55: mixed casing derived from the Keccak-256 hash of the lowercase address — Etherfuse requires this, it's not optional. */
 function toChecksumAddress(address: string): string {
   const lower = address.toLowerCase().replace(/^0x/, "");
   const hash = keccak256(lower);
@@ -124,13 +129,13 @@ function toChecksumAddress(address: string): string {
   return result;
 }
 
-/** Dirección EVM al azar (0x + 40 hex, EIP-55 checksummed). Nunca firmamos nada acá — cualquier dirección EVM puede recibir un ERC-20 sin configuración previa. */
+/** Random EVM address (0x + 40 hex, EIP-55 checksummed). We never sign anything here — any EVM address can receive an ERC-20 with no prior setup. */
 function generateEvmAddress(): string {
   return toChecksumAddress(randomBytes(20).toString("hex"));
 }
 
 // ---------------------------------------------------------------------------
-// Stablebonds: resolver el activo destino en vivo (nunca hardcodeado)
+// Stablebonds: resolve the target asset live (never hardcoded)
 // ---------------------------------------------------------------------------
 
 interface StablebondChainEntry {
@@ -149,11 +154,11 @@ interface TargetAssetCandidate {
 }
 
 /**
- * Candidatos de stablebond activo para `cur` en `chain`, de mayor a menor
- * `totalSupply` — consultando el catálogo público en vivo. Varios bonds
- * pueden compartir moneda (p. ej. CETES + "Cetes2"); si el mejor candidato
- * falla en la API (rotado/agotado), {@link createQuoteForCurrency} prueba el
- * siguiente. `.env` puede forzar un valor con `ETHERFUSE_TARGET_ASSET`.
+ * Active stablebond candidates for `cur` on `chain`, from highest to lowest
+ * `totalSupply` — queried live against the public catalog. Several bonds can
+ * share a currency (e.g. CETES + "Cetes2"); if the best candidate fails at
+ * the API (rotated/depleted), {@link createQuoteForCurrency} tries the next
+ * one. `.env` can force a value via `ETHERFUSE_TARGET_ASSET`.
  */
 async function resolveTargetAssetCandidates(cur: EtherfuseFiat, chain: Chain): Promise<TargetAssetCandidate[]> {
   const override = process.env.ETHERFUSE_TARGET_ASSET;
@@ -173,29 +178,34 @@ async function resolveTargetAssetCandidates(cur: EtherfuseFiat, chain: Chain): P
       .map(({ symbol, asset }) => ({ symbol, asset }));
 
     if (candidates.length) return candidates;
-    console.warn(`⚠ Sin stablebond activo para ${cur} en ${chain} — uso el fallback fijo.`);
+    console.warn(`⚠ No active stablebond for ${cur} on ${chain} — using the fixed fallback.`);
   } catch (error) {
-    console.warn(`⚠ No se pudo consultar client.lookup.stablebonds() — uso el fallback fijo:`, error);
+    console.warn(`⚠ Could not query client.lookup.stablebonds() — using the fixed fallback:`, error);
   }
   const fallback = FALLBACK_TARGET_ASSET[cur][chain];
   return fallback ? [{ asset: fallback, symbol: STABLEBOND_FOR[cur] }] : [];
 }
 
-/** `NonStableAsset` es el error puntual de un mint rotado/agotado — vale la pena probar el siguiente candidato. */
+/** `NonStableAsset` is the specific error for a rotated/depleted mint — worth trying the next candidate. */
 function isNonStableAssetError(error: unknown): boolean {
   if (!(error instanceof EtherfuseAPIError) || error.status !== 400) return false;
   const body = error.body as { type?: string } | undefined;
   return body?.type === "NonStableAsset";
 }
 
-/** Pide la quote probando cada candidato de {@link resolveTargetAssetCandidates} hasta que uno funcione. */
+/** Requests the quote, trying each candidate from {@link resolveTargetAssetCandidates} until one works. */
 async function createQuoteForCurrency(
   orgId: string,
   cur: EtherfuseFiat,
   chain: Chain,
 ): Promise<{ quote: Quote; targetAsset: string; targetSymbol?: string }> {
   const candidates = await resolveTargetAssetCandidates(cur, chain);
-  if (!candidates.length) throw new Error(`Sin candidatos de activo destino para ${cur} en ${chain}.`);
+  if (!candidates.length) throw new Error(`No target-asset candidates for ${cur} on ${chain}.`);
+
+  // Random each run (well under the sandbox's own amount cap either way) so
+  // re-running this script doesn't collide with an order a previous run
+  // already left pending for the same account.
+  const sourceAmount = String(randomBrlAmount());
 
   let lastError: unknown;
   for (const candidate of candidates) {
@@ -203,31 +213,31 @@ async function createQuoteForCurrency(
       const quote = await client.quotes.create({
         customerId: orgId,
         blockchain: chain,
-        sourceAmount: "500",
+        sourceAmount,
         quoteAssets: { type: "onramp", sourceAsset: cur, targetAsset: candidate.asset },
       });
       return { quote, targetAsset: candidate.asset, targetSymbol: candidate.symbol };
     } catch (error) {
       lastError = error;
       if (!isNonStableAssetError(error)) throw error;
-      console.warn(`⚠ ${candidate.asset} rechazado (Non-stable) — probando el siguiente candidato...`);
+      console.warn(`⚠ ${candidate.asset} rejected (Non-stable) — trying the next candidate...`);
     }
   }
   throw lastError;
 }
 
 // ---------------------------------------------------------------------------
-// Trustline automática (solo Stellar)
+// Automatic trustline (Stellar only)
 // ---------------------------------------------------------------------------
 
-/** `"CODE-ISSUER"` (formato Etherfuse/Stellar) → `{ code, issuer }` para el SDK. */
+/** `"CODE-ISSUER"` (Etherfuse/Stellar format) → `{ code, issuer }` for the SDK. */
 function parseStellarAsset(identifier: string): { code: string; issuer: string } {
   const sep = identifier.indexOf("-");
-  if (sep === -1) throw new Error(`No pude parsear code/issuer de "${identifier}" (esperaba "CODE-ISSUER").`);
+  if (sep === -1) throw new Error(`Could not parse code/issuer from "${identifier}" (expected "CODE-ISSUER").`);
   return { code: identifier.slice(0, sep), issuer: identifier.slice(sep + 1) };
 }
 
-/** Abre (o confirma) la trustline para `targetAsset` en la cuenta de `keypair`, fondeada por Friendbot. Devuelve el hash de la tx. */
+/** Opens (or confirms) the trustline for `targetAsset` on `keypair`'s account, funded via Friendbot. Returns the tx hash. */
 async function ensureStellarTrustline(keypair: Keypair, targetAsset: string): Promise<string> {
   const { code, issuer } = parseStellarAsset(targetAsset);
   const account = await stellarServer.loadAccount(keypair.publicKey());
@@ -241,7 +251,7 @@ async function ensureStellarTrustline(keypair: Keypair, targetAsset: string): Pr
 }
 
 // ---------------------------------------------------------------------------
-// Resultado por chain, para el resumen final
+// Per-chain result, for the final summary
 // ---------------------------------------------------------------------------
 
 interface ChainResult {
@@ -261,7 +271,7 @@ interface ChainResult {
   depositPixCode?: string;
   fiatReceivedSimulated?: boolean;
   fiatReceivedError?: string;
-  /** "pending" cuando no llegó a un estado terminal en el chequeo único (no bloqueante). */
+  /** "pending" when the single, non-blocking check didn't reach a terminal state. */
   status?: string;
   statusPage?: string;
 }
@@ -273,7 +283,7 @@ async function runChain(orgId: string, currency: EtherfuseFiat, bankAccountId: s
   chainResults.push(result);
   console.log(`\n── Chain: ${chain} ─────────────────────────────────────────`);
 
-  // ── Wallet de prueba para esta chain ────────────────────────────────────
+  // ── Throwaway wallet for this chain ─────────────────────────────────────
   let publicKey: string;
   let stellarKeypair: Keypair | undefined;
   try {
@@ -290,21 +300,21 @@ async function runChain(orgId: string, currency: EtherfuseFiat, bankAccountId: s
     console.log(`✔ Wallet: ${publicKey}`);
   } catch (error) {
     result.walletError = String(error instanceof Error ? error.message : error);
-    console.error(`✘ No se pudo preparar una wallet para ${chain} — sigo con la siguiente chain:`, error);
+    console.error(`✘ Could not prepare a wallet for ${chain} — moving on to the next chain:`, error);
     return;
   }
 
-  // Etherfuse exige que la wallet esté registrada antes de usarla en una
-  // orden ("Wallet not found or not authorized" si se salta este paso).
+  // Etherfuse requires the wallet to be registered before it's used in an
+  // order ("Wallet not found or not authorized" if this step is skipped).
   try {
     const wallet = await client.wallets.register({ publicKey, blockchain: chain });
-    console.log(`✔ Wallet registrada: ${wallet.id} (kyc: ${wallet.raw.kycStatus ?? "n/a"})`);
+    console.log(`✔ Wallet registered: ${wallet.id} (kyc: ${wallet.raw.kycStatus ?? "n/a"})`);
   } catch (error) {
     result.walletError = String(error instanceof Error ? error.message : error);
-    console.error(`✘ No se pudo registrar la wallet para ${chain} — la orden probablemente falle:`, error);
+    console.error(`✘ Could not register the wallet for ${chain} — the order will likely fail:`, error);
   }
 
-  // ── Quote (resuelve el stablebond activo, expira en 2 minutos) ──────────
+  // ── Quote (resolves the active stablebond, expires in 2 minutes) ────────
   let quoteResult: Awaited<ReturnType<typeof createQuoteForCurrency>>;
   try {
     quoteResult = await createQuoteForCurrency(orgId, currency, chain);
@@ -313,86 +323,89 @@ async function runChain(orgId: string, currency: EtherfuseFiat, bankAccountId: s
     result.quoteTargetAsset = quoteResult.targetAsset;
     result.quoteTargetSymbol = quoteResult.targetSymbol;
     console.log(
-      `✔ Quote ${quoteResult.quote.id}: 500 ${currency} → ${quoteResult.quote.destinationAmount} ` +
-        `${quoteResult.targetSymbol ?? ""} (rate ${quoteResult.quote.exchangeRate}, activo ${quoteResult.targetAsset})`,
+      `✔ Quote ${quoteResult.quote.id}: ${quoteResult.quote.raw.sourceAmount} ${currency} → ${quoteResult.quote.destinationAmount} ` +
+        `${quoteResult.targetSymbol ?? ""} (rate ${quoteResult.quote.exchangeRate}, asset ${quoteResult.targetAsset})`,
     );
   } catch (error) {
     result.quoteError = String(error instanceof Error ? error.message : error);
-    console.error(`✘ No se pudo obtener una quote para ${chain} — sigo con la siguiente chain:`, error);
+    console.error(`✘ Could not get a quote for ${chain} — moving on to the next chain:`, error);
     return;
   }
 
-  // ── Trustline automática (solo Stellar) ──────────────────────────────────
+  // ── Automatic trustline (Stellar only) ───────────────────────────────────
   if (chain === Chain.Stellar && stellarKeypair) {
     try {
       result.trustlineTx = await ensureStellarTrustline(stellarKeypair, quoteResult.targetAsset);
-      console.log(`✔ Trustline abierta: tx ${result.trustlineTx}`);
+      console.log(`✔ Trustline opened: tx ${result.trustlineTx}`);
     } catch (error) {
       result.trustlineError = String(error instanceof Error ? error.message : error);
-      console.error(`✘ No se pudo abrir la trustline para ${chain} — la orden puede fallar igual:`, error);
+      console.error(`✘ Could not open the trustline for ${chain} — the order might still fail:`, error);
     }
   }
 
-  // ── Orden ────────────────────────────────────────────────────────────────
+  // ── Order ─────────────────────────────────────────────────────────────────
   if (!bankAccountId) {
-    console.log(`ℹ Salteo la orden para ${chain}: no hay cuenta bancaria.`);
+    console.log(`ℹ Skipping the order for ${chain}: no bank account.`);
     return;
   }
   let receipt: OrderReceipt;
   try {
     receipt = await quoteResult.quote.createOrder({ bankAccountId, publicKey, blockchain: chain });
     result.orderId = receipt.orderId;
-    console.log(`✔ Orden creada: ${receipt.orderId}`);
+    console.log(`✔ Order created: ${receipt.orderId}`);
   } catch (error) {
     result.orderError = String(error instanceof Error ? error.message : error);
-    console.error(`✘ No se pudo crear la orden para ${chain} — sigo con la siguiente chain:`, error);
+    console.error(`✘ Could not create the order for ${chain} — moving on to the next chain:`, error);
     return;
   }
 
-  // ── Instrucciones de pago / QR PIX ──────────────────────────────────────
+  // ── Payment instructions / PIX QR ───────────────────────────────────────
   if (receipt.deposit?.method === "pix") {
     result.depositMethod = "pix";
     result.depositPixCode = receipt.deposit.pixCode;
-    console.log(`✔ Código PIX (copia e cola): ${receipt.deposit.pixCode}`);
+    console.log(`✔ PIX code (copia e cola): ${receipt.deposit.pixCode}`);
+    await printQr(receipt.deposit.pixCode, "PIX QR");
   } else if (receipt.deposit?.method === "spei") {
     result.depositMethod = "spei";
     result.depositPixCode = receipt.deposit.clabe;
-    console.log(`✔ Depósito SPEI:`, receipt.deposit);
+    console.log(`✔ SPEI deposit:`, receipt.deposit);
   } else if (currency === FiatCurrency.BRL) {
-    // El sandbox no devuelve el BR Code para esta orden puntual; lo generamos
-    // localmente con el motor PIX de la librería, mismo monto:
+    // The sandbox doesn't return a BR Code for this particular order; we
+    // generate one locally with the library's PIX engine, same amount as
+    // the quote actually requested.
     const demo = Pix.create({
       pixKey: "sandbox@etherfuse.com.br",
       merchantName: "Etherfuse Sandbox",
       merchantCity: "Sao Paulo",
-      amount: "500",
+      amount: quoteResult.quote.raw.sourceAmount ?? randomBrlAmount(),
       txid: receipt.orderId.replace(/-/g, "").slice(0, 25),
     });
-    result.depositMethod = "pix (demo local)";
+    result.depositMethod = "pix (local demo)";
     result.depositPixCode = demo.toString();
-    console.log(`ℹ Copia e cola (demo local): ${demo.toString()}`);
+    console.log(`ℹ Copia e cola (local demo): ${demo.toString()}`);
+    await printQr(demo.toString(), "PIX QR (local demo)");
   }
 
-  // ── Simular que el fiat llegó — no bloquea si falla ─────────────────────
+  // ── Simulate the fiat arriving — non-blocking on failure ────────────────
   try {
     await client.sandbox.fiatReceived(receipt.orderId);
     result.fiatReceivedSimulated = true;
-    console.log("✔ Depósito fiat simulado");
+    console.log("✔ Fiat deposit simulated");
   } catch (error) {
     result.fiatReceivedError = String(error instanceof Error ? error.message : error);
-    console.error(`✘ No se pudo simular el depósito fiat para ${chain} — sigo igual:`, error);
+    console.error(`✘ Could not simulate the fiat deposit for ${chain} — continuing anyway:`, error);
   }
 
-  // ── UN chequeo de estado, sin poll largo: lo no-terminal queda "pending" ─
+  // ── ONE status check, no long poll: anything non-terminal stays "pending" ─
   try {
     const current = await receipt.fetch();
     result.status = current.isTerminal ? current.status : "pending";
     result.statusPage = current.statusPage;
-    console.log(`  Estado: ${result.status}${current.isTerminal ? "" : ` (real: "${current.status}")`}`);
-    console.log(`  Página de estado: ${current.statusPage ?? "n/a"}`);
+    console.log(`  Status: ${result.status}${current.isTerminal ? "" : ` (actual: "${current.status}")`}`);
+    console.log(`  Status page: ${current.statusPage ?? "n/a"}`);
   } catch (error) {
     result.status = "pending";
-    console.warn(`  No se pudo chequear el estado de ${chain} — queda como "pending".`, error);
+    console.warn(`  Could not check the status for ${chain} — left as "pending".`, error);
   }
 }
 
@@ -401,28 +414,28 @@ async function runChain(orgId: string, currency: EtherfuseFiat, bankAccountId: s
 // ---------------------------------------------------------------------------
 
 /**
- * Corre el flujo de Etherfuse completo (las 5 chains) y devuelve el detalle
- * por chain. `null` si falta `ETHERFUSE_API_KEY` — no lanza, para que
- * `all-flows.ts` pueda saltear esta sección prolijamente y seguir con las
- * demás.
+ * Runs the full Etherfuse flow (all 5 chains) and returns the per-chain
+ * detail. `null` if `ETHERFUSE_API_KEY` is missing — doesn't throw, so
+ * `all-flows.ts` can skip this section cleanly and continue with the rest.
  */
 export async function runEtherfuseFlow(): Promise<ChainResult[] | null> {
   const API_KEY = process.env.ETHERFUSE_API_KEY;
   if (!API_KEY) {
-    console.error("⚠ Falta ETHERFUSE_API_KEY (ponla en .env) — salteo el flujo de Etherfuse.");
+    console.error("⚠ Missing ETHERFUSE_API_KEY (set it in .env) — skipping the Etherfuse flow.");
     return null;
   }
-  client = new EtherfuseClient({ apiKey: API_KEY, environment: "sandbox" });
+  cosmos = new CosmosClient({ etherfuse: { apiKey: API_KEY, environment: "sandbox" } });
+  client = cosmos.etherfuse!;
   client.on("debug", (m) => process.env.DEBUG && console.log(m));
   chainResults = [];
 
-  // ── 1. Organización ────────────────────────────────────────────────────
+  // ── 1. Organization ─────────────────────────────────────────────────────
   const me = await client.customers.me();
-  console.log(`✔ Organización: ${me.id} (${me.displayName ?? "sin nombre"})`);
+  console.log(`✔ Organization: ${me.id} (${me.displayName ?? "unnamed"})`);
 
-  // ── 2. Cuenta bancaria: reutiliza una compliant o crea una PIX ─────────
-  // El sandbox solo permite UNA cuenta BRL por organización. Es compartida
-  // por todas las chains — el fiat entra una sola vez por moneda.
+  // ── 2. Bank account: reuse a compliant one or create a PIX one ─────────
+  // The sandbox only allows ONE BRL account per organization. It's shared
+  // across every chain — fiat only comes in once per currency.
   let currency: EtherfuseFiat = FiatCurrency.BRL;
   let bankAccountId: string | undefined;
   try {
@@ -434,7 +447,7 @@ export async function runEtherfuseFlow(): Promise<ChainResult[] | null> {
     if (existing) {
       currency = existing.isPix ? FiatCurrency.BRL : FiatCurrency.MXN;
       bankAccountId = existing.id;
-      console.log(`✔ Reutilizando cuenta ${currency} existente: ${existing.id}`);
+      console.log(`✔ Reusing existing ${currency} account: ${existing.id}`);
     } else {
       try {
         const pix = await client.bankAccounts.createPixPersonal(me.id, {
@@ -445,10 +458,10 @@ export async function runEtherfuseFlow(): Promise<ChainResult[] | null> {
           pixKeyType: "email",
         });
         bankAccountId = pix.id;
-        console.log(`✔ Cuenta PIX creada: ${pix.id} (compliant: ${pix.compliant})`);
+        console.log(`✔ PIX account created: ${pix.id} (compliant: ${pix.compliant})`);
       } catch (error) {
         if (!(error instanceof EtherfuseAPIError)) throw error;
-        console.warn(`⚠ PIX no disponible (${error.message}) — probando CLABE/MXN...`);
+        console.warn(`⚠ PIX not available (${error.message}) — trying CLABE/MXN instead...`);
         currency = FiatCurrency.MXN;
         const clabe = await client.bankAccounts.createClabePersonal(me.id, {
           firstName: "Ana",
@@ -457,28 +470,28 @@ export async function runEtherfuseFlow(): Promise<ChainResult[] | null> {
           birthDate: "19900515",
           birthCountryIsoCode: "MX",
           curp: "GALA900515MDFRPN08",
-          rfc: "XEXX010101000", // RFC mágico del sandbox: auto-aprueba
-          clabe: "012180015700000000", // CLABE de ejemplo no-STP (el sandbox rechaza 646)
+          rfc: "XEXX010101000", // sandbox's magic RFC: auto-approves
+          clabe: "012180015700000000", // sample non-STP CLABE (the sandbox rejects 646)
         });
         bankAccountId = clabe.id;
-        console.log(`✔ Cuenta CLABE creada: ${clabe.id}`);
+        console.log(`✔ CLABE account created: ${clabe.id}`);
       }
     }
   } catch (error) {
-    console.error("✘ No se pudo obtener/crear una cuenta bancaria — sigo sin ella:", error);
+    console.error("✘ Could not fetch/create a bank account — continuing without one:", error);
   }
 
-  // ── 3. Una corrida completa por cada chain ─────────────────────────────
+  // ── 3. One full run per chain ───────────────────────────────────────────
   for (const chain of CHAINS) {
     await runChain(me.id, currency, bankAccountId, chain);
   }
 
-  client.destroy();
+  cosmos.destroy();
   return chainResults;
 }
 
 export function printEtherfuseSummary(results: ChainResult[]) {
-  console.log("\n══ Resumen final — Etherfuse (todas las chains) ════════════");
+  console.log("\n══ Final summary — Etherfuse (all chains) ══════════════════");
   for (const r of results) {
     console.log(`\n${r.chain}:`);
     console.log("  Wallet:            ", r.walletAddress ?? `n/a${r.walletError ? ` — error: ${r.walletError}` : ""}`);
@@ -488,16 +501,16 @@ export function printEtherfuseSummary(results: ChainResult[]) {
     console.log(
       "  Quote:             ",
       r.quoteId ?? `n/a${r.quoteError ? ` — error: ${r.quoteError}` : ""}`,
-      r.quoteDestinationAmount ? `(→ ${r.quoteDestinationAmount} ${r.quoteTargetSymbol ?? ""}, activo ${r.quoteTargetAsset})` : "",
+      r.quoteDestinationAmount ? `(→ ${r.quoteDestinationAmount} ${r.quoteTargetSymbol ?? ""}, asset ${r.quoteTargetAsset})` : "",
     );
-    console.log("  Orden:             ", r.orderId ?? `n/a${r.orderError ? ` — error: ${r.orderError}` : ""}`);
-    if (r.depositMethod) console.log("  Depósito:          ", r.depositMethod, r.depositPixCode ?? "");
+    console.log("  Order:             ", r.orderId ?? `n/a${r.orderError ? ` — error: ${r.orderError}` : ""}`);
+    if (r.depositMethod) console.log("  Deposit:           ", r.depositMethod, r.depositPixCode ?? "");
     console.log(
-      "  Depósito simulado: ",
-      r.fiatReceivedSimulated ? "sí" : `no${r.fiatReceivedError ? ` — error: ${r.fiatReceivedError}` : ""}`,
+      "  Deposit simulated: ",
+      r.fiatReceivedSimulated ? "yes" : `no${r.fiatReceivedError ? ` — error: ${r.fiatReceivedError}` : ""}`,
     );
-    console.log("  Estado:            ", r.status ?? "n/a");
-    console.log("  Página de estado:  ", r.statusPage ?? "n/a");
+    console.log("  Status:            ", r.status ?? "n/a");
+    console.log("  Status page:       ", r.statusPage ?? "n/a");
   }
   console.log("\n═════════════════════════════════════════════════════════");
 }
@@ -508,7 +521,7 @@ if (isMainModule(import.meta.url)) {
       if (results) printEtherfuseSummary(results);
     })
     .catch((error) => {
-      // Red de seguridad: cada chain atrapa lo suyo, esto no debería disparar.
-      console.error("\n✘ Error inesperado:", error);
+      // Safety net: each chain already catches its own errors, this shouldn't fire.
+      console.error("\n✘ Unexpected error:", error);
     });
 }

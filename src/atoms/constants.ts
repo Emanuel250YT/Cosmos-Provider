@@ -1,5 +1,5 @@
 /**
- * Atom: constantes globales y tabla de rutas de la API de Etherfuse.
+ * Atom: global constants and route table for the Etherfuse API.
  *
  * `Routes` is the single source of truth for API paths: if Etherfuse changes
  * an endpoint, fix it here and the whole library inherits the change.
@@ -57,7 +57,7 @@ export const OrderStatuses = {
 
 export type OrderStatus = (typeof OrderStatuses)[keyof typeof OrderStatuses];
 
-/** Estados desde los que la orden ya no avanza. */
+/** Statuses from which the order no longer advances. */
 export const TERMINAL_ORDER_STATUSES: readonly OrderStatus[] = [
   OrderStatuses.Completed,
   OrderStatuses.Failed,
@@ -76,7 +76,7 @@ export const PixKeyTypes = {
 
 export type PixKeyType = (typeof PixKeyTypes)[keyof typeof PixKeyTypes];
 
-/** Eventos que emite {@link EtherfuseClient}. */
+/** Events emitted by {@link EtherfuseClient}. */
 export const ClientEventNames = {
   Ready: "ready",
   Debug: "debug",
@@ -87,9 +87,9 @@ export const ClientEventNames = {
 } as const;
 
 /**
- * Tabla de rutas. Las marcadas con `@inferred` no aparecen literalmente en la
- * documentación pública y siguen la convención del resto de la API; verifícalas
- * contra https://docs.etherfuse.com si un endpoint devuelve 404.
+ * Route table. Entries marked `@inferred` don't appear literally in the
+ * public docs and follow the convention of the rest of the API; verify them
+ * against https://docs.etherfuse.com if an endpoint returns 404.
  */
 export const Routes = {
   // Quotes
@@ -100,7 +100,7 @@ export const Routes = {
   orderById: (orderId: string) => `/ramp/order/${orderId}` as const,
   /** @inferred */
   orders: () => `/ramp/orders` as const,
-  /** Sandbox: simula el depósito fiat de una orden onramp. */
+  /** Sandbox: simulates the fiat deposit for an onramp order. */
   orderFiatReceived: () => `/ramp/order/fiat_received` as const,
 
   // Customers
@@ -147,7 +147,7 @@ export const Routes = {
   wsToken: () => `/ramp/ws-api-token` as const,
   wsGateway: () => `/ramp/ws` as const,
 
-  // Lookup (público, sin API key)
+  // Lookup (public, no API key required)
   lookupExchangeRate: () => `/lookup/exchange_rate` as const,
   /** @inferred */
   lookupStablebonds: () => `/lookup/stablebonds` as const,
@@ -159,11 +159,11 @@ export const Routes = {
   lookupRestrictedCountries: () => `/lookup/restricted_countries` as const,
 } as const;
 
-/** UUID v4 aleatorio (disponible en Node >= 18 y en todos los navegadores modernos). */
+/** Random UUID v4 (available in Node >= 18 and all modern browsers). */
 export function randomUUID(): string {
   const c = globalThis.crypto;
   if (c?.randomUUID) return c.randomUUID();
-  // Fallback muy improbable (entornos sin WebCrypto)
+  // Highly unlikely fallback (environments without WebCrypto)
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (ch) => {
     const r = (Math.random() * 16) | 0;
     const v = ch === "x" ? r : (r & 0x3) | 0x8;

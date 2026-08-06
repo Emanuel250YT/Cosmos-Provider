@@ -168,6 +168,8 @@ export interface PaymentProvider {
   readonly regions: readonly string[];
   /** Fiat currencies this provider can collect/pay out. */
   readonly currencies: readonly FiatCurrencyCode[];
+  /** Optional logo URL, for UIs that list providers (e.g. a payment-method picker). */
+  readonly logoUrl?: string;
 
   /** Build a fiat charge (QR, link or deposit instructions). */
   createCharge(request: CreateChargeRequest): Promise<Charge>;

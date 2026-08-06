@@ -1,9 +1,9 @@
 /**
  * Atom: HTTP transport layer.
  *
- * - Autenticación: la API key va en `Authorization` SIN prefijo `Bearer`.
- * - Reintentos con backoff exponencial para 424/429/5xx y errores de red.
- * - Isomórfica: usa `fetch` global (Node >= 18 y navegadores).
+ * - Authentication: the API key goes in `Authorization` WITHOUT the `Bearer` prefix.
+ * - Retries with exponential backoff for 424/429/5xx and network errors.
+ * - Isomorphic: uses the global `fetch` (Node >= 18 and browsers).
  */
 
 import { BASE_URLS, type Environment } from "@/atoms/constants";
@@ -12,32 +12,32 @@ import { EtherfuseAPIError, EtherfuseNetworkError } from "@/atoms/errors";
 export type QueryValue = string | number | boolean | undefined | null;
 
 export interface RequestOptions {
-  /** Query string (los valores undefined/null se omiten). */
+  /** Query string (undefined/null values are omitted). */
   query?: Record<string, QueryValue>;
-  /** Cuerpo JSON. */
+  /** JSON body. */
   body?: unknown;
-  /** Cabeceras adicionales. */
+  /** Additional headers. */
   headers?: Record<string, string>;
-  /** Si `false`, no se envía la API key (endpoints públicos de /lookup). */
+  /** If `false`, the API key is not sent (public /lookup endpoints). */
   auth?: boolean;
-  /** Anula el número de reintentos configurado para esta petición. */
+  /** Overrides the configured retry count for this request. */
   retries?: number;
 }
 
 export interface RESTOptions {
-  /** API key de Etherfuse (sandbox y producción usan claves distintas). */
+  /** Etherfuse API key (sandbox and production use different keys). */
   apiKey?: string;
-  /** `sandbox` (default) o `production`. */
+  /** `sandbox` (default) or `production`. */
   environment?: Environment;
-  /** Anula la URL base derivada del environment. */
+  /** Overrides the base URL derived from the environment. */
   baseUrl?: string;
-  /** Implementación de fetch a usar (por defecto, la global). */
+  /** Fetch implementation to use (defaults to the global one). */
   fetch?: typeof fetch;
-  /** Timeout por intento, en ms. Default: 30 000. */
+  /** Timeout per attempt, in ms. Default: 30,000. */
   timeoutMs?: number;
-  /** Reintentos ante errores transitorios. Default: 2. */
+  /** Retries on transient errors. Default: 2. */
   retries?: number;
-  /** Callback de logging de bajo nivel. */
+  /** Low-level logging callback. */
   onDebug?: (message: string) => void;
 }
 
@@ -62,51 +62,51 @@ export class REST {
 
     if (typeof this.#fetch !== "function") {
       throw new EtherfuseNetworkError(
-        "No hay implementación global de fetch. Usa Node >= 18 o pasa `fetch` en las opciones.",
+        "No global fetch implementation found. Use Node >= 18 or pass `fetch` in the options.",
       );
     }
   }
 
-  /** Reemplaza la API key en caliente (p. ej. tras rotarla), sin recrear el cliente. */
+  /** Hot-swaps the API key (e.g. after rotating it) without recreating the client. */
   setApiKey(apiKey: string): this {
     this.#apiKey = apiKey;
     return this;
   }
 
-  /** `true` si hay una API key configurada. */
+  /** `true` if an API key is configured. */
   get hasApiKey(): boolean {
     return Boolean(this.#apiKey);
   }
 
-  /** GET con reintentos y (opcional) query string. */
+  /** GET with retries and an optional query string. */
   get<T>(path: string, options?: RequestOptions): Promise<T> {
     return this.request<T>("GET", path, options);
   }
 
-  /** POST con cuerpo JSON. */
+  /** POST with a JSON body. */
   post<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
     return this.request<T>("POST", path, { ...options, body });
   }
 
-  /** PUT con cuerpo JSON. */
+  /** PUT with a JSON body. */
   put<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
     return this.request<T>("PUT", path, { ...options, body });
   }
 
-  /** PATCH con cuerpo JSON. */
+  /** PATCH with a JSON body. */
   patch<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
     return this.request<T>("PATCH", path, { ...options, body });
   }
 
-  /** DELETE. La mayoría de los endpoints de Etherfuse no devuelven cuerpo. */
+  /** DELETE. Most Etherfuse endpoints return no body. */
   delete<T>(path: string, options?: RequestOptions): Promise<T> {
     return this.request<T>("DELETE", path, options);
   }
 
   /**
-   * Petición genérica con reintentos: reintenta con backoff exponencial +
-   * jitter ante errores de red o respuestas retryable (424/429/5xx),
-   * hasta `options.retries` (o el default del cliente) veces.
+   * Generic request with retries: retries with exponential backoff +
+   * jitter on network errors or retryable responses (424/429/5xx),
+   * up to `options.retries` times (or the client default).
    */
   async request<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
     const url = this.#buildUrl(path, options.query);
@@ -116,7 +116,7 @@ export class REST {
     for (let attempt = 0; attempt <= retries; attempt++) {
       if (attempt > 0) {
         const delay = 400 * 2 ** (attempt - 1) + Math.floor(Math.random() * 200);
-        this.#onDebug?.(`[REST] retry ${attempt}/${retries} en ${delay}ms → ${method} ${path}`);
+        this.#onDebug?.(`[REST] retry ${attempt}/${retries} in ${delay}ms → ${method} ${path}`);
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
 
@@ -131,11 +131,11 @@ export class REST {
       }
     }
 
-    // Inalcanzable, pero TypeScript no lo sabe.
+    // Unreachable, but TypeScript doesn't know that.
     throw lastError;
   }
 
-  /** Un único intento HTTP (sin reintentos): arma headers/body, aplica timeout, y mapea la respuesta o el error. */
+  /** A single HTTP attempt (no retries): builds headers/body, applies the timeout, and maps the response or error. */
   async #execute<T>(
     method: string,
     url: string,
@@ -144,7 +144,7 @@ export class REST {
   ): Promise<T> {
     const headers: Record<string, string> = { ...options.headers };
     if (options.auth !== false && this.#apiKey) {
-      // Etherfuse espera la key tal cual, sin "Bearer".
+      // Etherfuse expects the key as-is, without "Bearer".
       headers["Authorization"] = this.#apiKey;
     }
     if (options.body !== undefined) headers["Content-Type"] = "application/json";
@@ -163,7 +163,7 @@ export class REST {
         signal: controller.signal,
       });
     } catch (cause) {
-      throw new EtherfuseNetworkError(`Fallo de red en ${method} ${path}`, { cause });
+      throw new EtherfuseNetworkError(`Network failure on ${method} ${path}`, { cause });
     } finally {
       clearTimeout(timer);
     }
@@ -176,7 +176,7 @@ export class REST {
     return payload as T;
   }
 
-  /** Lee el body como JSON; si no parsea (o está vacío), devuelve el texto crudo o `null`. */
+  /** Reads the body as JSON; if it doesn't parse (or is empty), returns the raw text or `null`. */
   static async #parseBody(response: Response): Promise<unknown> {
     const text = await response.text().catch(() => "");
     if (!text) return null;
@@ -187,7 +187,7 @@ export class REST {
     }
   }
 
-  /** Arma la URL final: `baseUrl + path` con la query string (omitiendo valores `undefined`/`null`). */
+  /** Builds the final URL: `baseUrl + path` with the query string (omitting `undefined`/`null` values). */
   #buildUrl(path: string, query?: Record<string, QueryValue>): string {
     const url = new URL(this.baseUrl + path);
     if (query) {
